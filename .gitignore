@@ -1,0 +1,10 @@
+# Bỏ qua thư mục chứa file .class được biên dịch ra
+bin/
+target/
+
+# Bỏ qua cấu hình riêng của VS Code
+.vscode/
+
+# Bỏ qua các file cấu hình hệ điều hành
+.DS_Store
+Thumbs.db
