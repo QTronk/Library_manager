@@ -1,6 +1,8 @@
 package library.ui;
 
 import library.model.User;
+import library.service.MockDatabase;
+
 import javax.swing.*;
 import java.awt.*;
 
@@ -66,24 +68,50 @@ public class LoginPanel extends JPanel {
 
         // Nút Hủy: Trả về trang chính
         btnCancel.addActionListener(e -> {
-            if (listener != null) {
-                listener.onCancelLogin();
-            }
+            if (listener != null) listener.onCancelLogin();
         });
 
-        // Nút Đăng nhập: Sẽ bổ sung xử lý sự kiện Socket/SwingWorker ở bước sau
+        btnLogin.addActionListener(e -> handleLogin());
     }
 
-    // Các hàm getter để hỗ trợ lấy thông tin dữ liệu nhập từ UI
-    public String getUsernameInput() {
-        return txtUsername.getText().trim();
-    }
+    private void handleLogin() {
+        String username = txtUsername.getText().trim();
+        String password = new String(txtPassword.getPassword()).trim();
 
-    public String getPasswordInput() {
-        return new String(txtPassword.getPassword()).trim();
-    }
+        if (username.isEmpty() || password.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Vui lòng nhập Username và Password!");
+            return;
+        }
 
-    public JButton getBtnLogin() {
-        return btnLogin;
+        btnLogin.setEnabled(false); // Tránh spam click[cite: 1]
+
+        SwingWorker<User, Void> worker = new SwingWorker<>() {
+            @Override
+            protected User doInBackground() throws Exception {
+                return MockDatabase.authenticate(username, password);
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    User user = get();
+                    if (user != null) {
+                        JOptionPane.showMessageDialog(LoginPanel.this, 
+                            "Đăng nhập thành công! Xin chào " + user.getFullName());
+                        if (listener != null) listener.onLoginSuccess(user);
+                    } else {
+                        JOptionPane.showMessageDialog(LoginPanel.this, 
+                            "Mật khẩu hoặc Tên đăng nhập không đúng!", 
+                            "Lỗi", JOptionPane.ERROR_MESSAGE);
+                    }
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(LoginPanel.this, "Lỗi kết nối!");
+                } finally {
+                    btnLogin.setEnabled(true);
+                }
+            }
+        };
+
+        worker.execute(); // Chạy luồng ngầm
     }
 }
