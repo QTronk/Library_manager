@@ -96,12 +96,12 @@ public class LoginPanel extends JPanel {
                 try {
                     User user = get();
                     if (user != null) {
-                        JOptionPane.showMessageDialog(LoginPanel.this, 
+                        JOptionPane.showMessageDialog(LoginPanel.this,
                             "Đăng nhập thành công! Xin chào " + user.getFullName());
                         if (listener != null) listener.onLoginSuccess(user);
                     } else {
-                        JOptionPane.showMessageDialog(LoginPanel.this, 
-                            "Mật khẩu hoặc Tên đăng nhập không đúng!", 
+                        JOptionPane.showMessageDialog(LoginPanel.this,
+                            "Mật khẩu hoặc Tên đăng nhập không đúng!",
                             "Lỗi", JOptionPane.ERROR_MESSAGE);
                     }
                 } catch (Exception ex) {
