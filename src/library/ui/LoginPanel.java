@@ -1,7 +1,7 @@
 package library.ui;
 
 import library.model.User;
-import library.service.MockDatabase;
+import library.service.SocketClient;
 
 import javax.swing.*;
 import java.awt.*;
@@ -88,7 +88,8 @@ public class LoginPanel extends JPanel {
         SwingWorker<User, Void> worker = new SwingWorker<>() {
             @Override
             protected User doInBackground() throws Exception {
-                return MockDatabase.authenticate(username, password);
+                return SocketClient.getInstance().login(username, password);
+                //return MockDatabase.authenticate(username, password);
             }
 
             @Override
