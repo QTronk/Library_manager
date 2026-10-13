@@ -5,6 +5,8 @@ import library.service.SocketClient;
 
 import javax.swing.*;
 import java.awt.*;
+import java.io.IOException;
+import java.util.concurrent.ExecutionException;
 
 public class LoginPanel extends JPanel {
     private JTextField txtUsername;
@@ -38,10 +40,10 @@ public class LoginPanel extends JPanel {
         gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 2;
         add(lblTitle, gbc);
 
-        // 2. Tên đăng nhập
+        // 2. Email hoặc SĐT (Backend xác thực bằng Email hoặc Số điện thoại)
         gbc.gridwidth = 1;
         gbc.gridx = 0; gbc.gridy = 1;
-        add(new JLabel("Tên đăng nhập:"), gbc);
+        add(new JLabel("Email hoặc SĐT:"), gbc);
 
         txtUsername = new JTextField(18);
         gbc.gridx = 1; gbc.gridy = 1;
@@ -76,20 +78,19 @@ public class LoginPanel extends JPanel {
 
     private void handleLogin() {
         String username = txtUsername.getText().trim();
-        String password = new String(txtPassword.getPassword()).trim();
+        String password = new String(txtPassword.getPassword()); // Không trim mật khẩu: Backend so sánh nguyên văn
 
         if (username.isEmpty() || password.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Vui lòng nhập Username và Password!");
+            JOptionPane.showMessageDialog(this, "Vui lòng nhập Email/SĐT và Mật khẩu!");
             return;
         }
 
-        btnLogin.setEnabled(false); // Tránh spam click[cite: 1]
+        btnLogin.setEnabled(false); // Tránh spam click
 
         SwingWorker<User, Void> worker = new SwingWorker<>() {
             @Override
             protected User doInBackground() throws Exception {
                 return SocketClient.getInstance().login(username, password);
-                //return MockDatabase.authenticate(username, password);
             }
 
             @Override
@@ -105,8 +106,19 @@ public class LoginPanel extends JPanel {
                             "Mật khẩu hoặc Tên đăng nhập không đúng!",
                             "Lỗi", JOptionPane.ERROR_MESSAGE);
                     }
-                } catch (Exception ex) {
-                    JOptionPane.showMessageDialog(LoginPanel.this, "Lỗi kết nối!");
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                } catch (ExecutionException ex) {
+                    // Lấy đúng nguyên nhân thật thay vì luôn báo "Lỗi kết nối!"
+                    Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+                    boolean connectionProblem = cause instanceof IOException;
+                    String message = cause.getMessage() != null && !cause.getMessage().trim().isEmpty()
+                            ? cause.getMessage()
+                            : "Đã xảy ra lỗi không xác định.";
+
+                    JOptionPane.showMessageDialog(LoginPanel.this, message,
+                        connectionProblem ? "Lỗi kết nối" : "Đăng nhập thất bại",
+                        JOptionPane.ERROR_MESSAGE);
                 } finally {
                     btnLogin.setEnabled(true);
                 }

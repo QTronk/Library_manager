@@ -1,11 +1,15 @@
 package library.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 import java.io.Serializable;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class Response implements Serializable {
-    private String status;  // "SUCCESS" hoặc "ERROR"
+    // Backend trả về một trong: "SUCCESS", "ERROR", "BAD_REQUEST", "UNAUTHORIZED"
+    private String status;
     private String message; // Thông báo từ Server
-    private Object data;    // Dữ liệu payload (User, List<Book>, ...)
+    private Object data;    // Dữ liệu payload (User, List<Book>, ...), có thể là null
 
     public Response() {}
 

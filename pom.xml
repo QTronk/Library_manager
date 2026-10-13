@@ -14,9 +14,18 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
-    <!-- Khai báo thư mục gốc mã nguồn là src -->
     <build>
+        <!-- Khai báo thư mục gốc mã nguồn là src -->
         <sourceDirectory>src</sourceDirectory>
+
+        <!-- Copy config.properties ra gốc classpath (target/classes/config.properties)
+             để SocketClient đọc được bằng getResourceAsStream("config.properties").
+             Nếu thiếu khối này, Maven bỏ qua file vì thư mục resource mặc định là src/main/resources. -->
+        <resources>
+            <resource>
+                <directory>src/library/main/resources</directory>
+            </resource>
+        </resources>
     </build>
 
     <dependencies>
