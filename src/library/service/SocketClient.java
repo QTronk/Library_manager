@@ -1,7 +1,9 @@
 package library.service;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import library.model.Book;
 import library.model.Request;
 import library.model.Response;
 import library.model.User;
@@ -20,7 +22,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
@@ -37,6 +42,10 @@ public class SocketClient {
 
     private static final int CONNECT_TIMEOUT_MS = 5_000;
     private static final int READ_TIMEOUT_MS = 15_000;
+
+    // Backend phân trang SEARCH_BOOKS (mặc định 10 sách/trang). Mình xin trang lớn và tự lặp cho đến khi hết.
+    private static final int BOOK_PAGE_SIZE = 500;
+    private static final int MAX_BOOK_PAGES = 100; // chốt chặn an toàn, tránh lặp vô hạn
 
     // Khối static tự động chạy để đọc file config.properties ngay khi class được nạp
     static {
@@ -92,7 +101,6 @@ public class SocketClient {
             IS_MOCK_MODE = Boolean.parseBoolean(prop.getProperty("app.mock_mode", "true").trim());
             SERVER_HOST = prop.getProperty("app.server_host", SERVER_HOST).trim();
             SERVER_PORT = Integer.parseInt(prop.getProperty("app.server_port", String.valueOf(SERVER_PORT)).trim());
-
             System.out.println("[CONFIG] Nạp cấu hình thành công từ: " + source);
             System.out.println("[CONFIG] MOCK_MODE = " + IS_MOCK_MODE
                     + (IS_MOCK_MODE ? "" : ", Backend = " + SERVER_HOST + ":" + SERVER_PORT));
@@ -134,6 +142,45 @@ public class SocketClient {
         }
 
         throw new Exception(describeFailure(response, "Đăng nhập thất bại!"));
+    }
+
+    /**
+     * Gọi action SEARCH_BOOKS. keyword rỗng = lấy TẤT CẢ đầu sách.
+     * Backend lọc theo tên sách hoặc tên tác giả (không lọc theo thể loại).
+     * Backend phân trang (page, pageSize) nên hàm này tự gọi nhiều trang cho đến khi hết.
+     */
+    public List<Book> searchBooks(String keyword) throws Exception {
+        String kw = (keyword == null) ? "" : keyword.trim();
+        List<Book> all = new ArrayList<>();
+
+        for (int page = 1; page <= MAX_BOOK_PAGES; page++) {
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("keyword", kw);
+            payload.put("page", page);
+            payload.put("pageSize", BOOK_PAGE_SIZE);
+
+            Response response = sendRequest("SEARCH_BOOKS", payload);
+
+            if (!"SUCCESS".equalsIgnoreCase(response.getStatus()) || response.getData() == null) {
+                throw new Exception(describeFailure(response, "Không tải được danh sách sách!"));
+            }
+
+            // data = { "totalResults": n, "books": [ {...}, {...} ] }
+            String dataJson = mapper.writeValueAsString(response.getData());
+            BookSearchData result = mapper.readValue(dataJson, BookSearchData.class);
+            if (result.books == null) break;
+
+            all.addAll(result.books);
+            if (result.books.size() < BOOK_PAGE_SIZE) break; // trang cuối
+        }
+        return all;
+    }
+
+    /** Hình dạng của phần "data" trong phản hồi SEARCH_BOOKS. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class BookSearchData {
+        public int totalResults;
+        public List<Book> books = new ArrayList<>();
     }
 
     /**
@@ -250,7 +297,46 @@ public class SocketClient {
             return mapper.writeValueAsString(res);
         }
 
+        if ("SEARCH_BOOKS".equals(req.getAction())) {
+            Map<String, Object> params = mapper.readValue(
+                mapper.writeValueAsString(req.getData()),
+                new TypeReference<Map<String, Object>>() {}
+            );
+            String keyword = String.valueOf(params.getOrDefault("keyword", "")).trim().toLowerCase();
+            int page = ((Number) params.getOrDefault("page", 1)).intValue();
+            int pageSize = ((Number) params.getOrDefault("pageSize", 10)).intValue();
+
+            // Lọc giống Backend thật: theo tên sách hoặc tên tác giả
+            List<Book> matched = new ArrayList<>();
+            for (Book b : mockBooks()) {
+                if (keyword.isEmpty()
+                        || b.getTenSach().toLowerCase().contains(keyword)
+                        || b.getTacGia().toLowerCase().contains(keyword)) {
+                    matched.add(b);
+                }
+            }
+
+            // Phân trang giống Backend thật
+            int from = Math.min((page - 1) * pageSize, matched.size());
+            int to = Math.min(from + pageSize, matched.size());
+
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("totalResults", to - from);
+            data.put("books", new ArrayList<>(matched.subList(from, to)));
+            return mapper.writeValueAsString(new Response("SUCCESS", "Tìm kiếm sách thành công", data));
+        }
+
         return mapper.writeValueAsString(new Response("BAD_REQUEST", "Hành động không được hỗ trợ trong Mock", null));
+    }
+
+    /** Dữ liệu sách giả lập, cùng "hình dạng" với dữ liệu Backend trả về. */
+    private List<Book> mockBooks() {
+        List<Book> list = new ArrayList<>();
+        list.add(new Book(1, "Java Core", "James Gosling", "Lập trình", "NXB Trẻ", 150000));
+        list.add(new Book(2, "Clean Code", "Robert C. Martin", "Lập trình", "NXB Trẻ", 220000));
+        list.add(new Book(3, "C++ Programming", "Bjarne Stroustrup", "Lập trình", "NXB Giáo Dục", 180000));
+        list.add(new Book(4, "Doraemon", "Fujiko F. Fujio", "Truyện", "NXB Kim Đồng", 25000));
+        return list;
     }
 
     /**

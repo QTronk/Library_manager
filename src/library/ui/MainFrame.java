@@ -1,8 +1,13 @@
 package library.ui;
 
+import com.formdev.flatlaf.FlatDarkLaf;
+import com.formdev.flatlaf.FlatLightLaf;
+import com.formdev.flatlaf.FlatLaf;
 import library.model.User;
+
 import javax.swing.*;
 import java.awt.*;
+import java.net.URL;
 
 public class MainFrame extends JFrame {
 
@@ -16,30 +21,33 @@ public class MainFrame extends JFrame {
 
     // Header Components
     private JPanel headerRightPanel;
+    private JLabel titleLabel;
     private JButton loginButton;
 
-    // Sidebar Menu Panel & Base Buttons
+    // Biến Dark/Light Mode
+    private boolean isDarkMode = false;
+    private JButton themeToggleButton;
+
+    // Sidebar Menu Panel & Nút bấm
     private JPanel menuPanel;
     private JButton homeButton;
     private JButton searchButton;
 
-    // --- CÁC NÚT PHÂN QUYỀN TRÊN SIDEBAR ---
-    // 1. Role Độc giả (READER)
+    // Nút phân quyền Sidebar
     private JButton historyButton;
+    private JButton approveRenewButton;
+    private JButton approveBorrowButton;
+    private JButton returnBookButton;
+    private JButton manageStockButton;
+    private JButton manageReaderButton;
+    private JButton reportButton;
+    private JButton manageAccountButton;
+    private JButton configButton;
 
-    // 2. Role Thủ thư (LIBRARIAN)
-    private JButton approveRenewButton;   // Duyệt gia hạn sách
-    private JButton approveBorrowButton;  // Duyệt / Lập phiếu mượn
-    private JButton returnBookButton;     // Trả sách
-    private JButton manageStockButton;    // Quản lý kho sách
-    private JButton manageReaderButton;   // Quản lý độc giả
+    // --- BIẾN Quản LÝ NÚT ACTIVE ---
+    private JButton currentActiveButton = null;
 
-    // 3. Role Admin (ADMIN)
-    private JButton reportButton;         // Thống kê & Báo cáo
-    private JButton manageAccountButton;  // Quản lý tài khoản
-    private JButton configButton;         // Cấu hình quy định
-
-    private User currentUser = null; // Flag trạng thái phiên đăng nhập
+    private User currentUser = null;
 
     public MainFrame() {
         setTitle("Library Management System");
@@ -55,14 +63,67 @@ public class MainFrame extends JFrame {
         // 1. HEADER PANEL (NORTH)
         // ==========================================
         JPanel header = new JPanel(new BorderLayout());
-        JLabel title = new JLabel("   Library Management");
-        title.setFont(new Font("Arial", Font.BOLD, 20));
+        header.setBorder(BorderFactory.createEmptyBorder(8, 12, 8, 12));
 
-        headerRightPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        // Title Panel: <logo1> Library Management <logo>
+        JPanel titlePanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        titlePanel.setOpaque(false);
+
+        // 1. Logo1 (Biểu tượng vô cực - LỚN)
+        JLabel logo1Label = new JLabel();
+        try {
+            URL imgUrl1 = getClass().getResource("/logo1.png");
+            ImageIcon icon1 = (imgUrl1 != null) ? new ImageIcon(imgUrl1) : new ImageIcon("logo1.png");
+            if (icon1.getIconWidth() > 0) {
+                int targetHeight1 = 32;
+                int targetWidth1 = (int) ((double) icon1.getIconWidth() / icon1.getIconHeight() * targetHeight1);
+                Image img1 = icon1.getImage().getScaledInstance(targetWidth1, targetHeight1, Image.SCALE_SMOOTH);
+                logo1Label.setIcon(new ImageIcon(img1));
+            }
+        } catch (Exception ignored) {}
+
+        // 2. Chữ "Library Management" Xanh lá
+        titleLabel = new JLabel("Library Management");
+        titleLabel.setFont(new Font("Arial", Font.BOLD, 20));
+        titleLabel.setForeground(new Color(16, 185, 129)); // Emerald Green
+
+        // 3. Logo (Biểu tượng xanh biển - NHỎ)
+        JLabel logoLabel = new JLabel();
+        try {
+            URL imgUrl = getClass().getResource("/logo.png");
+            ImageIcon icon = (imgUrl != null) ? new ImageIcon(imgUrl) : new ImageIcon("logo.png");
+            if (icon.getIconWidth() > 0) {
+                int targetHeight = 22;
+                int targetWidth = (int) ((double) icon.getIconWidth() / icon.getIconHeight() * targetHeight);
+                Image img = icon.getImage().getScaledInstance(targetWidth, targetHeight, Image.SCALE_SMOOTH);
+                logoLabel.setIcon(new ImageIcon(img));
+            }
+        } catch (Exception ignored) {}
+
+        titlePanel.add(logo1Label);
+        titlePanel.add(titleLabel);
+        titlePanel.add(logoLabel);
+
+        headerRightPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
+        headerRightPanel.setOpaque(false);
+
+        // Nút Toggle Dark/Light Mode
+        themeToggleButton = new JButton("🌙");
+        themeToggleButton.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 16));
+        themeToggleButton.setFocusPainted(false);
+        themeToggleButton.setContentAreaFilled(false);
+        themeToggleButton.setBorderPainted(false);
+        themeToggleButton.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        themeToggleButton.setPreferredSize(new Dimension(50, 36));
+        themeToggleButton.setMargin(new Insets(0, 0, 0, 0));
+        themeToggleButton.addActionListener(e -> toggleTheme());
+
         loginButton = new JButton("Đăng nhập");
+
+        headerRightPanel.add(themeToggleButton);
         headerRightPanel.add(loginButton);
 
-        header.add(title, BorderLayout.WEST);
+        header.add(titlePanel, BorderLayout.WEST);
         header.add(headerRightPanel, BorderLayout.EAST);
 
         // ==========================================
@@ -70,25 +131,23 @@ public class MainFrame extends JFrame {
         // ==========================================
         menuPanel = new JPanel();
         menuPanel.setLayout(new BoxLayout(menuPanel, BoxLayout.Y_AXIS));
+        menuPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
-        // Nút Default
-        homeButton = new JButton("Trang chủ");
-        searchButton = new JButton("Tra cứu sách");
+        homeButton = createMenuButton("Trang chủ");
+        searchButton = createMenuButton("Tra cứu sách");
 
-        // Khởi tạo các nút Phân quyền
-        historyButton = new JButton("Lịch sử mượn");
+        historyButton = createMenuButton("Lịch sử mượn");
 
-        approveRenewButton = new JButton("Duyệt gia hạn sách");
-        approveBorrowButton = new JButton("Duyệt / Lập phiếu mượn");
-        returnBookButton = new JButton("Trả sách");
-        manageStockButton = new JButton("Quản lý kho sách");
-        manageReaderButton = new JButton("Quản lý độc giả");
+        approveRenewButton = createMenuButton("Duyệt gia hạn sách");
+        approveBorrowButton = createMenuButton("Duyệt / Lập phiếu mượn");
+        returnBookButton = createMenuButton("Trả sách");
+        manageStockButton = createMenuButton("Quản lý kho sách");
+        manageReaderButton = createMenuButton("Quản lý độc giả");
 
-        reportButton = new JButton("Thống kê & Báo cáo");
-        manageAccountButton = new JButton("Quản lý tài khoản");
-        configButton = new JButton("Cấu hình quy định");
+        reportButton = createMenuButton("Thống kê & Báo cáo");
+        manageAccountButton = createMenuButton("Quản lý tài khoản");
+        configButton = createMenuButton("Cấu hình quy định");
 
-        // Khởi tạo ban đầu chưa đăng nhập: Cập nhật Menu chỉ add các nút Default
         updateSidebarByRole(null);
 
         // ==========================================
@@ -106,62 +165,140 @@ public class MainFrame extends JFrame {
                 currentUser = user;
                 renderUserHeader(user);
                 updateSidebarByRole(user.getRole());
-                cardLayout.show(contentPanel, CARD_HOME);
+                navigateTo(homeButton, CARD_HOME);
             }
 
             @Override
             public void onCancelLogin() {
-                cardLayout.show(contentPanel, CARD_HOME);
+                navigateTo(homeButton, CARD_HOME);
             }
         });
         contentPanel.add(loginPanel, CARD_LOGIN);
 
         // ==========================================
-        // 4. NAVIGATION EVENTS
+        // 4. NAVIGATION EVENTS WITH ACTIVE HIGHLIGHT
         // ==========================================
-        homeButton.addActionListener(e -> cardLayout.show(contentPanel, CARD_HOME));
-        searchButton.addActionListener(e -> cardLayout.show(contentPanel, CARD_SEARCH));
-        loginButton.addActionListener(e -> cardLayout.show(contentPanel, CARD_LOGIN));
+        homeButton.addActionListener(e -> navigateTo(homeButton, CARD_HOME));
+        searchButton.addActionListener(e -> navigateTo(searchButton, CARD_SEARCH));
+        
+        historyButton.addActionListener(e -> navigateTo(historyButton, CARD_HOME));
+        approveRenewButton.addActionListener(e -> navigateTo(approveRenewButton, CARD_HOME));
+        approveBorrowButton.addActionListener(e -> navigateTo(approveBorrowButton, CARD_HOME));
+        returnBookButton.addActionListener(e -> navigateTo(returnBookButton, CARD_HOME));
+        manageStockButton.addActionListener(e -> navigateTo(manageStockButton, CARD_HOME));
+        manageReaderButton.addActionListener(e -> navigateTo(manageReaderButton, CARD_HOME));
+
+        reportButton.addActionListener(e -> navigateTo(reportButton, CARD_HOME));
+        manageAccountButton.addActionListener(e -> navigateTo(manageAccountButton, CARD_HOME));
+        configButton.addActionListener(e -> navigateTo(configButton, CARD_HOME));
+
+        loginButton.addActionListener(e -> {
+            setActiveButton(null); // Bỏ active ở sidebar khi sang Login
+            cardLayout.show(contentPanel, CARD_LOGIN);
+        });
 
         add(header, BorderLayout.NORTH);
         add(menuPanel, BorderLayout.WEST);
         add(contentPanel, BorderLayout.CENTER);
 
-        cardLayout.show(contentPanel, CARD_HOME);
+        // Mặc định chọn Trang chủ ban đầu
+        navigateTo(homeButton, CARD_HOME);
+    }
+
+    // --- HÀM CHUYỂN TRANG VÀ ĐỔI TRẠNG THÁI ACTIVE ---
+    private void navigateTo(JButton button, String cardName) {
+        setActiveButton(button);
+        cardLayout.show(contentPanel, cardName);
+    }
+
+    // --- LOGIC ĐỔI MÀU NÚT ACTIVE (XANH LÁ NGỌC LỤC BẢO) ---
+    private void setActiveButton(JButton button) {
+        // Reset màu nút Active cũ về màu Button mặc định chuẩn của FlatLaf
+        if (currentActiveButton != null) {
+            currentActiveButton.setBackground(UIManager.getColor("Button.background"));
+            currentActiveButton.setForeground(UIManager.getColor("Button.foreground"));
+        }
+
+        currentActiveButton = button;
+
+        // Đặt màu Active mới cho nút vừa chọn
+        if (currentActiveButton != null) {
+            Color activeColor = isDarkMode ? new Color(5, 150, 105) : new Color(16, 185, 129);
+            currentActiveButton.setBackground(activeColor);
+            currentActiveButton.setForeground(Color.WHITE);
+        }
+    }
+
+    private JButton createMenuButton(String text) {
+        JButton btn = new JButton(text);
+        btn.setHorizontalAlignment(SwingConstants.CENTER);
+        btn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 38));
+        btn.setAlignmentX(Component.CENTER_ALIGNMENT);
+        return btn;
+    }
+
+    private void addMenuButton(JButton btn) {
+        menuPanel.add(btn);
+        menuPanel.add(Box.createVerticalStrut(8));
     }
 
     // ==========================================
-    // LOGIC CẬP NHẬT HEADER (USER DROPDOWN MENU)
+    // LOGIC CHUYỂN ĐỔI DARK / LIGHT MODE
+    // ==========================================
+    private void toggleTheme() {
+        isDarkMode = !isDarkMode;
+
+        if (isDarkMode) {
+            FlatDarkLaf.setup();
+            themeToggleButton.setText("☀️");
+            if (titleLabel != null) {
+                titleLabel.setForeground(new Color(52, 211, 153));
+            }
+        } else {
+            FlatLightLaf.setup();
+            themeToggleButton.setText("🌙");
+            if (titleLabel != null) {
+                titleLabel.setForeground(new Color(16, 185, 129));
+            }
+        }
+
+        FlatLaf.updateUI();
+
+        // Cập nhật lại màu nút Active sau khi đổi Theme
+        if (currentActiveButton != null) {
+            setActiveButton(currentActiveButton);
+        }
+    }
+
+    // ==========================================
+    // LOGIC CẬP NHẬT HEADER & SIDEBAR
     // ==========================================
     private void renderUserHeader(User user) {
         headerRightPanel.removeAll();
+
+        headerRightPanel.add(themeToggleButton);
 
         JButton userMenuButton = new JButton(user.getFullName() + " ▼");
         userMenuButton.setFocusPainted(false);
 
         JPopupMenu popupMenu = new JPopupMenu();
 
-        // 1. Tài khoản (Đổi tài khoản / Mật khẩu)
         JMenuItem itemAccount = new JMenuItem("Tài khoản");
         itemAccount.addActionListener(e -> JOptionPane.showMessageDialog(this, "Chức năng: Đổi tài khoản / Mật khẩu"));
         popupMenu.add(itemAccount);
 
-        // 2. Thông báo
         JMenuItem itemNotify = new JMenuItem("Thông báo");
         itemNotify.addActionListener(e -> JOptionPane.showMessageDialog(this, "Chức năng: Xem thông báo cá nhân"));
         popupMenu.add(itemNotify);
 
         popupMenu.addSeparator();
 
-        // 3. Đăng xuất
         JMenuItem itemLogout = new JMenuItem("Đăng xuất");
         itemLogout.setForeground(Color.RED);
         itemLogout.addActionListener(e -> handleLogout());
         popupMenu.add(itemLogout);
 
-        userMenuButton.addActionListener(e -> {
-            popupMenu.show(userMenuButton, 0, userMenuButton.getHeight());
-        });
+        userMenuButton.addActionListener(e -> popupMenu.show(userMenuButton, 0, userMenuButton.getHeight()));
 
         headerRightPanel.add(userMenuButton);
         headerRightPanel.revalidate();
@@ -172,28 +309,23 @@ public class MainFrame extends JFrame {
         currentUser = null;
 
         headerRightPanel.removeAll();
+        headerRightPanel.add(themeToggleButton);
         headerRightPanel.add(loginButton);
         headerRightPanel.revalidate();
         headerRightPanel.repaint();
 
         updateSidebarByRole(null);
+        navigateTo(homeButton, CARD_HOME);
 
-        cardLayout.show(contentPanel, CARD_HOME);
         JOptionPane.showMessageDialog(this, "Đã đăng xuất thành công!");
     }
 
-    // ==========================================
-    // LOGIC PHÂN QUYỀN REBUILD SIDEBAR (KHÔNG BỊ THỦNG LỖ)
-    // ==========================================
     private void updateSidebarByRole(String role) {
-        // 1. Xóa sạch nút cũ và các đoạn đệm thừa trên Sidebar
         menuPanel.removeAll();
 
-        // 2. Luôn luôn thêm 2 nút Mặc định (Default cho mọi người dùng)
         addMenuButton(homeButton);
         addMenuButton(searchButton);
 
-        // 3. Kiểm tra Role và CHỈ ADD NHỮNG NÚT ĐƯỢC PHÉP
         if ("READER".equals(role)) {
             addMenuButton(historyButton);
         } 
@@ -205,29 +337,21 @@ public class MainFrame extends JFrame {
             addMenuButton(manageReaderButton);
         } 
         else if ("ADMIN".equals(role)) {
-            // Nếu Admin hiển thị 3 nút Quản trị riêng
             addMenuButton(reportButton);
             addMenuButton(manageAccountButton);
             addMenuButton(configButton);
-
-            // Ghi chú: Nếu muốn Admin hiển thị cả các nút của Thủ thư, 
-            // bạn chỉ cần bỏ comment các dòng dưới đây:
-            // addMenuButton(approveRenewButton);
-            // addMenuButton(approveBorrowButton);
-            // addMenuButton(returnBookButton);
-            // addMenuButton(manageStockButton);
-            // addMenuButton(manageReaderButton);
         }
 
-        // 4. Cập nhật lại Layout để vẽ các nút nối tiếp sát khít nhau
+        // Đồng bộ giao diện Sidebar
+        SwingUtilities.updateComponentTreeUI(menuPanel);
+
+        // Đảm bảo nút đang active vẫn giữ đúng màu Xanh
+        if (currentActiveButton != null) {
+            setActiveButton(currentActiveButton);
+        }
+
         menuPanel.revalidate();
         menuPanel.repaint();
-    }
-
-    // Hàm bổ trợ thêm nút kèm khoảng đệm chuẩn 8px
-    private void addMenuButton(JButton btn) {
-        menuPanel.add(btn);
-        menuPanel.add(Box.createVerticalStrut(8));
     }
 
     private JPanel createHomePanel() {

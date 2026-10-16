@@ -74,9 +74,16 @@ public class LoginPanel extends JPanel {
         });
 
         btnLogin.addActionListener(e -> handleLogin());
+
+        // Nhấn Enter: ở ô Email/SĐT thì nhảy xuống ô Mật khẩu, ở ô Mật khẩu thì đăng nhập luôn
+        txtUsername.addActionListener(e -> txtPassword.requestFocusInWindow());
+        txtPassword.addActionListener(e -> handleLogin());
     }
 
     private void handleLogin() {
+        // Đang chờ Backend trả lời (hoặc người dùng bấm Enter liên tục) thì bỏ qua, tránh gửi trùng request
+        if (!btnLogin.isEnabled()) return;
+
         String username = txtUsername.getText().trim();
         String password = new String(txtPassword.getPassword()); // Không trim mật khẩu: Backend so sánh nguyên văn
 
