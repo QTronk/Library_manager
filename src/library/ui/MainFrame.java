@@ -38,7 +38,6 @@ public class MainFrame extends JFrame {
 
     // Nút phân quyền Sidebar
     private JButton historyButton;
-    private JButton approveRenewButton;
     private JButton approveBorrowButton;
     private JButton returnBookButton;
     private JButton manageStockButton;
@@ -143,7 +142,6 @@ public class MainFrame extends JFrame {
 
         historyButton = createMenuButton("Lịch sử mượn");
 
-        approveRenewButton = createMenuButton("Duyệt gia hạn sách");
         approveBorrowButton = createMenuButton("Lập phiếu mượn");
         returnBookButton = createMenuButton("Trả sách");
         manageStockButton = createMenuButton("Quản lý kho sách");
@@ -190,7 +188,6 @@ public class MainFrame extends JFrame {
         searchButton.addActionListener(e -> navigateTo(searchButton, CARD_SEARCH));
         
         historyButton.addActionListener(e -> navigateTo(historyButton, CARD_HISTORY));
-        approveRenewButton.addActionListener(e -> navigateTo(approveRenewButton, CARD_HOME));
         approveBorrowButton.addActionListener(e -> navigateTo(approveBorrowButton, CARD_BORROW));
         returnBookButton.addActionListener(e -> navigateTo(returnBookButton, CARD_HOME));
         manageStockButton.addActionListener(e -> navigateTo(manageStockButton, CARD_HOME));
@@ -348,7 +345,6 @@ public class MainFrame extends JFrame {
             addMenuButton(historyButton);
         } 
         else if ("LIBRARIAN".equals(role)) {
-            addMenuButton(approveRenewButton);
             addMenuButton(approveBorrowButton);
             addMenuButton(returnBookButton);
             addMenuButton(manageStockButton);

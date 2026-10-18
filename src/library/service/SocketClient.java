@@ -226,6 +226,26 @@ public class SocketClient {
         return all;
     }
 
+    /**
+     * Gọi action RENEW_BOOK (UC-09): gia hạn 1 cuốn đang mượn. Gia hạn có hiệu lực ngay, không cần duyệt;
+     * Backend tự cộng thêm số ngày theo cấu hình hệ thống nên Client không gửi số ngày.
+     *
+     * @return thông báo của Backend, ví dụ "Gia hạn thành công. Ngày hẹn trả mới là: 12/11/2026"
+     *
+     * Không nằm trong SAFE_TO_RETRY: action ghi dữ liệu nên không tự gửi lại khi lỗi kết nối.
+     */
+    public String renewBook(int maCTPM) throws Exception {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("maCTPM", maCTPM);
+
+        Response response = sendRequest("RENEW_BOOK", payload);
+
+        if (!"SUCCESS".equalsIgnoreCase(response.getStatus())) {
+            throw new Exception(describeFailure(response, "Gia hạn thất bại!"));
+        }
+        return response.getMessage() != null ? response.getMessage() : "Gia hạn thành công!";
+    }
+
     /** Đóng kết nối tới Backend (gọi khi thoát ứng dụng nếu cần). */
     public synchronized void disconnect() {
         closeConnection();
@@ -522,7 +542,7 @@ public class SocketClient {
                 it.put("quaHan", daysLeft < 0);
                 it.put("soNgayTre", daysLeft < 0 ? -daysLeft : 0);
                 it.put("tienPhatDuKien", daysLeft < 0 ? -daysLeft * 5000.0 : 0.0);
-                it.put("coTheGiaHan", false);
+                it.put("coTheGiaHan", daysLeft >= 0 && (Integer) x[6] < 2);
                 items.add(it);
             }
             Map<String, Object> data = new LinkedHashMap<>();
@@ -533,6 +553,14 @@ public class SocketClient {
             data.put("totalPages", 1);
             data.put("items", items);
             return mapper.writeValueAsString(new Response("SUCCESS", "Tải lịch sử mượn trả thành công", data));
+        }
+
+        if ("RENEW_BOOK".equals(req.getAction())) {
+            // Mock không lưu trạng thái nên danh sách sau khi làm mới sẽ không đổi
+            return mapper.writeValueAsString(new Response("SUCCESS",
+                "Gia hạn thành công. Ngày hẹn trả mới là: "
+                    + java.time.LocalDate.now().plusDays(14).format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy")),
+                null));
         }
 
         if ("SEARCH_BOOKS".equals(req.getAction())) {

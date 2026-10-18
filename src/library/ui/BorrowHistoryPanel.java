@@ -8,15 +8,18 @@ import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.JTableHeader;
 import javax.swing.table.TableColumn;
+import javax.swing.table.TableCellRenderer;
 import javax.swing.table.TableColumnModel;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Font;
+import java.awt.Point;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
 import java.awt.event.MouseAdapter;
+import java.awt.event.MouseMotionAdapter;
 import java.awt.event.MouseEvent;
 import java.io.IOException;
 import java.text.Collator;
@@ -32,7 +35,8 @@ import java.util.Locale;
 import java.util.concurrent.ExecutionException;
 
 /**
- * Màn hình "Lịch sử mượn" của Độc giả (UC-08): danh sách sách ĐANG MƯỢN, chỉ để xem (read-only).
+ * Màn hình "Lịch sử mượn" của Độc giả (UC-08, UC-09): danh sách sách ĐANG MƯỢN.
+ * Bảng không sửa được ô; mỗi dòng có nút Gia hạn (tự động, không cần duyệt), bị khóa khi Backend báo coTheGiaHan = false.
  *
  * - Mặc định sắp xếp theo Hạn trả gần nhất. Bấm tiêu đề cột để sắp xếp theo cột đó (làm ở phía Client,
  *   không gọi lại Backend): bấm lần đầu = tăng dần (▼), bấm lại cùng cột = giảm dần (▲).
@@ -42,7 +46,7 @@ public class BorrowHistoryPanel extends JPanel {
 
     private static final String[] COLUMN_NAMES = {
             "Mã phiếu", "Tên sách", "Mã cuốn sách", "Ngày mượn",
-            "Hạn trả", "Lần gia hạn", "Tình trạng", "Tiền phạt dự kiến"
+            "Hạn trả", "Lần gia hạn", "Tình trạng", "Tiền phạt dự kiến", "Thao tác"
     };
     private static final int COL_MA_PHIEU = 0;
     private static final int COL_TEN_SACH = 1;
@@ -52,6 +56,7 @@ public class BorrowHistoryPanel extends JPanel {
     private static final int COL_GIA_HAN = 5;
     private static final int COL_TINH_TRANG = 6;
     private static final int COL_TIEN_PHAT = 7;
+    private static final int COL_ACTION = 8; // Cột chứa nút Gia hạn (không dùng để sắp xếp)
 
     private static final DateTimeFormatter DATE_VN = DateTimeFormatter.ofPattern("dd/MM/yyyy");
     private static final DateTimeFormatter TIME_VN = DateTimeFormatter.ofPattern("HH:mm:ss");
@@ -63,7 +68,8 @@ public class BorrowHistoryPanel extends JPanel {
     private JLabel statusLabel;
 
     private final List<Row> rows = new ArrayList<>(); // Thứ tự trong list = thứ tự hiển thị trên bảng
-    private boolean loading = false;
+    private boolean loading = false;   // Đang tải danh sách
+    private boolean renewing = false;  // Đang gửi yêu cầu gia hạn
 
     // Trạng thái sắp xếp hiện tại: mặc định Hạn trả, tăng dần (gần nhất trước)
     private int sortColumn = COL_HAN_TRA;
@@ -114,6 +120,28 @@ public class BorrowHistoryPanel extends JPanel {
             }
         });
 
+        // Cột "Thao tác": vẽ nút Gia hạn trên từng dòng (khóa nếu Backend báo không gia hạn được)
+        table.getColumnModel().getColumn(COL_ACTION).setCellRenderer(new RenewButtonRenderer());
+        table.getColumnModel().getColumn(COL_ACTION).setPreferredWidth(90);
+        table.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (!SwingUtilities.isLeftMouseButton(e)) return;
+                int row = renewableRowAt(e.getPoint());
+                if (row >= 0) {
+                    renewRow(row);
+                }
+            }
+        });
+        table.addMouseMotionListener(new MouseMotionAdapter() {
+            @Override
+            public void mouseMoved(MouseEvent e) {
+                table.setCursor(renewableRowAt(e.getPoint()) >= 0
+                        ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                        : Cursor.getDefaultCursor());
+            }
+        });
+
         // Bấm vào tiêu đề cột để sắp xếp
         final JTableHeader header = table.getTableHeader();
         header.setReorderingAllowed(false); // Không cho kéo đổi chỗ cột (để chỉ số cột luôn cố định)
@@ -157,7 +185,7 @@ public class BorrowHistoryPanel extends JPanel {
     // TẢI DỮ LIỆU
     // ==========================================================
     private void loadHistory() {
-        if (loading) return; // Đang có 1 request chạy rồi
+        if (loading || renewing) return; // Đang có 1 request chạy rồi
 
         setLoading(true);
 
@@ -228,6 +256,7 @@ public class BorrowHistoryPanel extends JPanel {
     // SẮP XẾP (làm ở Client)
     // ==========================================================
     private void onHeaderClicked(int column) {
+        if (column == COL_ACTION) return; // Cột nút bấm, không sắp xếp
         if (column == sortColumn) {
             ascending = !ascending;   // Bấm lại cùng cột -> đảo chiều
         } else {
@@ -312,8 +341,116 @@ public class BorrowHistoryPanel extends JPanel {
                     formatDate(it.ngayHenTra),
                     it.soLanGiaHan,
                     r.statusText,
-                    priceFormat.format(it.tienPhatDuKien) + " đ"
+                    priceFormat.format(it.tienPhatDuKien) + " đ",
+                    "Gia hạn"
             });
+        }
+    }
+
+    // ==========================================================
+    // GIA HẠN
+    // ==========================================================
+
+    /** Trả về chỉ số dòng nếu điểm bấm nằm trên một nút Gia hạn đang bật; ngược lại trả -1. */
+    private int renewableRowAt(Point point) {
+        if (loading || renewing) return -1;
+
+        int viewRow = table.rowAtPoint(point);
+        int viewColumn = table.columnAtPoint(point);
+        if (viewRow < 0 || viewColumn < 0 || viewRow >= rows.size()) return -1;
+        if (table.convertColumnIndexToModel(viewColumn) != COL_ACTION) return -1;
+
+        return rows.get(viewRow).item.coTheGiaHan ? viewRow : -1;
+    }
+
+    private void renewRow(int index) {
+        if (loading || renewing || index < 0 || index >= rows.size()) return;
+
+        final Row row = rows.get(index);
+        if (!row.item.coTheGiaHan) return;
+
+        // Gia hạn không hoàn tác được và tốn 1 lần trong số lần tối đa nên hỏi xác nhận trước
+        int choice = JOptionPane.showConfirmDialog(this,
+                "Gia hạn cuốn \"" + nz(row.item.tenSach) + "\"?\n"
+                        + "Hạn trả hiện tại: " + formatDate(row.item.ngayHenTra) + "\n"
+                        + "Mỗi cuốn chỉ được gia hạn một số lần giới hạn và không thể hoàn tác.",
+                "Xác nhận gia hạn", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+        if (choice != JOptionPane.YES_OPTION) return;
+
+        setRenewing(true);
+
+        SwingWorker<String, Void> worker = new SwingWorker<String, Void>() {
+            @Override
+            protected String doInBackground() throws Exception {
+                return SocketClient.getInstance().renewBook(row.item.maCTPM);
+            }
+
+            @Override
+            protected void done() {
+                String successMessage = null;
+                String errorMessage = null;
+                boolean connectionProblem = false;
+
+                try {
+                    successMessage = get();
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                } catch (ExecutionException ex) {
+                    Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+                    connectionProblem = cause instanceof IOException;
+                    errorMessage = cause.getMessage() != null && !cause.getMessage().trim().isEmpty()
+                            ? cause.getMessage()
+                            : "Đã xảy ra lỗi không xác định.";
+                }
+
+                setRenewing(false);
+
+                if (successMessage != null) {
+                    JOptionPane.showMessageDialog(BorrowHistoryPanel.this, successMessage,
+                            "Gia hạn thành công", JOptionPane.INFORMATION_MESSAGE);
+                } else if (errorMessage != null) {
+                    JOptionPane.showMessageDialog(BorrowHistoryPanel.this, errorMessage,
+                            connectionProblem ? "Lỗi kết nối" : "Gia hạn thất bại",
+                            JOptionPane.ERROR_MESSAGE);
+                }
+
+                // Tải lại để cập nhật hạn trả mới, số lần gia hạn và trạng thái các nút
+                // (kể cả khi lỗi, vì trạng thái có thể đã đổi, ví dụ vừa có người đặt trước)
+                loadHistory();
+            }
+        };
+        worker.execute();
+    }
+
+    private void setRenewing(boolean value) {
+        renewing = value;
+        refreshButton.setEnabled(!value && !loading);
+        if (value) {
+            statusLabel.setText("Đang gia hạn...");
+        }
+        table.repaint(); // Vẽ lại để các nút Gia hạn bị khóa trong lúc đang gửi
+    }
+
+    /** Vẽ nút "Gia hạn" trong ô; chỉ để hiển thị, việc bấm được xử lý ở MouseListener của bảng. */
+    private class RenewButtonRenderer implements TableCellRenderer {
+        private final JPanel panel = new JPanel(new BorderLayout());
+        private final JButton button = new JButton("Gia hạn");
+
+        RenewButtonRenderer() {
+            panel.setOpaque(true);
+            panel.setBorder(BorderFactory.createEmptyBorder(3, 6, 3, 6));
+            button.setFocusable(false);
+            panel.add(button, BorderLayout.CENTER);
+        }
+
+        @Override
+        public Component getTableCellRendererComponent(JTable t, Object value, boolean isSelected,
+                                                       boolean hasFocus, int row, int column) {
+            boolean enabled = !loading && !renewing
+                    && row >= 0 && row < rows.size() && rows.get(row).item.coTheGiaHan;
+            button.setEnabled(enabled);
+            panel.setBackground(isSelected ? t.getSelectionBackground() : t.getBackground());
+            return panel;
         }
     }
 
