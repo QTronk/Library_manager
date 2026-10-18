@@ -288,8 +288,8 @@ public class MainFrame extends JFrame {
 
         JPopupMenu popupMenu = new JPopupMenu();
 
-        JMenuItem itemAccount = new JMenuItem("Tài khoản");
-        itemAccount.addActionListener(e -> JOptionPane.showMessageDialog(this, "Chức năng: Đổi tài khoản / Mật khẩu"));
+        JMenuItem itemAccount = new JMenuItem("Đổi mật khẩu");
+        itemAccount.addActionListener(e -> new ChangePasswordDialog(this).setVisible(true));
         popupMenu.add(itemAccount);
 
         JMenuItem itemNotify = new JMenuItem("Thông báo");
@@ -300,7 +300,7 @@ public class MainFrame extends JFrame {
 
         JMenuItem itemLogout = new JMenuItem("Đăng xuất");
         itemLogout.setForeground(Color.RED);
-        itemLogout.addActionListener(e -> handleLogout());
+        itemLogout.addActionListener(e -> confirmLogout());
         popupMenu.add(itemLogout);
 
         userMenuButton.addActionListener(e -> popupMenu.show(userMenuButton, 0, userMenuButton.getHeight()));
@@ -308,6 +308,17 @@ public class MainFrame extends JFrame {
         headerRightPanel.add(userMenuButton);
         headerRightPanel.revalidate();
         headerRightPanel.repaint();
+    }
+
+    /** UC-06: hỏi xác nhận; chỉ khi người dùng chọn "Đồng ý" mới đăng xuất và báo Backend. */
+    private void confirmLogout() {
+        int choice = JOptionPane.showOptionDialog(this,
+                "Bạn có chắc chắn muốn đăng xuất?", "Đăng xuất",
+                JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE,
+                null, new Object[]{"Đồng ý", "Hủy"}, "Hủy");
+        if (choice == 0) { // 0 = nút "Đồng ý"
+            handleLogout();
+        }
     }
 
     private void handleLogout() {

@@ -246,6 +246,28 @@ public class SocketClient {
         return response.getMessage() != null ? response.getMessage() : "Gia hạn thành công!";
     }
 
+    /**
+     * Gọi action CHANGE_PASSWORD (UC-05 luồng B): đổi mật khẩu của người dùng đang đăng nhập.
+     * Backend lấy tài khoản từ phiên đăng nhập nên Client không gửi username.
+     *
+     * @return thông báo của Backend ("Đổi mật khẩu thành công!")
+     *
+     * Không nằm trong SAFE_TO_RETRY: action ghi dữ liệu nên không tự gửi lại khi lỗi kết nối.
+     */
+    public String changePassword(String oldPassword, String newPassword, String confirmPassword) throws Exception {
+        Map<String, String> payload = new HashMap<>();
+        payload.put("oldPassword", oldPassword);
+        payload.put("newPassword", newPassword);
+        payload.put("confirmPassword", confirmPassword);
+
+        Response response = sendRequest("CHANGE_PASSWORD", payload);
+
+        if (!"SUCCESS".equalsIgnoreCase(response.getStatus())) {
+            throw new Exception(describeFailure(response, "Đổi mật khẩu thất bại!"));
+        }
+        return response.getMessage() != null ? response.getMessage() : "Đổi mật khẩu thành công!";
+    }
+
     /** Đóng kết nối tới Backend (gọi khi thoát ứng dụng nếu cần). */
     public synchronized void disconnect() {
         closeConnection();
@@ -561,6 +583,29 @@ public class SocketClient {
                 "Gia hạn thành công. Ngày hẹn trả mới là: "
                     + java.time.LocalDate.now().plusDays(14).format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy")),
                 null));
+        }
+
+        if ("CHANGE_PASSWORD".equals(req.getAction())) {
+            Map<String, String> pw = mapper.readValue(
+                mapper.writeValueAsString(req.getData()),
+                new TypeReference<Map<String, String>>() {}
+            );
+            String oldPw = pw.get("oldPassword");
+            String newPw = pw.get("newPassword");
+            String confirmPw = pw.get("confirmPassword");
+
+            // Cùng thứ tự kiểm tra với Backend thật
+            if (newPw == null || newPw.length() < 6) {
+                return mapper.writeValueAsString(new Response("BAD_REQUEST", "Mật khẩu mới không hợp lệ (tối thiểu 6 ký tự)!", null));
+            }
+            if (!newPw.equals(confirmPw)) {
+                return mapper.writeValueAsString(new Response("ERROR", "Mật khẩu xác nhận không khớp!", null));
+            }
+            // Mock không lưu mật khẩu: chấp nhận 2 mật khẩu mẫu của tài khoản giả lập
+            if (!("123".equals(oldPw) || "Pass123".equals(oldPw))) {
+                return mapper.writeValueAsString(new Response("ERROR", "Mật khẩu cũ không chính xác!", null));
+            }
+            return mapper.writeValueAsString(new Response("SUCCESS", "Đổi mật khẩu thành công!", null));
         }
 
         if ("SEARCH_BOOKS".equals(req.getAction())) {

@@ -370,12 +370,13 @@ public class BorrowHistoryPanel extends JPanel {
         if (!row.item.coTheGiaHan) return;
 
         // Gia hạn không hoàn tác được và tốn 1 lần trong số lần tối đa nên hỏi xác nhận trước
-        int choice = JOptionPane.showConfirmDialog(this,
+        int choice = JOptionPane.showOptionDialog(this,
                 "Gia hạn cuốn \"" + nz(row.item.tenSach) + "\"?\n"
                         + "Hạn trả hiện tại: " + formatDate(row.item.ngayHenTra) + "\n"
                         + "Mỗi cuốn chỉ được gia hạn một số lần giới hạn và không thể hoàn tác.",
-                "Xác nhận gia hạn", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
-        if (choice != JOptionPane.YES_OPTION) return;
+                "Xác nhận gia hạn", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE,
+                null, new Object[]{"Gia hạn", "Hủy"}, "Hủy");
+        if (choice != 0) return; // 0 = nút "Gia hạn"
 
         setRenewing(true);
 
