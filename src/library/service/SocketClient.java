@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import library.model.Book;
+import library.model.BorrowHistoryResult;
 import library.model.BorrowTicketResult;
 import library.model.Request;
 import library.model.Response;
@@ -193,6 +194,36 @@ public class SocketClient {
 
         String dataJson = mapper.writeValueAsString(response.getData());
         return mapper.readValue(dataJson, BorrowTicketResult.class);
+    }
+
+    /**
+     * Gọi action GET_BORROW_HISTORY (tab BORROWING) để Độc giả xem các sách ĐANG MƯỢN của chính mình.
+     * Backend tự lấy thẻ từ phiên đăng nhập nên không cần gửi maThe. Tự gọi nhiều trang cho đến khi hết.
+     */
+    public List<BorrowHistoryResult.Item> getMyBorrowingBooks() throws Exception {
+        List<BorrowHistoryResult.Item> all = new ArrayList<>();
+
+        for (int page = 1; page <= MAX_BOOK_PAGES; page++) {
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("tab", "BORROWING");
+            payload.put("page", page);
+            payload.put("pageSize", BOOK_PAGE_SIZE);
+
+            Response response = sendRequest("GET_BORROW_HISTORY", payload);
+
+            if (!"SUCCESS".equalsIgnoreCase(response.getStatus()) || response.getData() == null) {
+                throw new Exception(describeFailure(response, "Không tải được lịch sử mượn!"));
+            }
+
+            String dataJson = mapper.writeValueAsString(response.getData());
+            BorrowHistoryResult result = mapper.readValue(dataJson, BorrowHistoryResult.class);
+            if (result.items == null) break;
+
+            all.addAll(result.items);
+            if (result.items.size() < BOOK_PAGE_SIZE) break;
+            if (result.totalPages > 0 && page >= result.totalPages) break;
+        }
+        return all;
     }
 
     /** Đóng kết nối tới Backend (gọi khi thoát ứng dụng nếu cần). */
@@ -464,6 +495,44 @@ public class SocketClient {
             data.put("ngayMuon", java.time.LocalDateTime.now().withNano(0).toString());
             data.put("chiTiet", List.of(line));
             return mapper.writeValueAsString(new Response("SUCCESS", "Lập phiếu mượn thành công!", data));
+        }
+
+        if ("GET_BORROW_HISTORY".equals(req.getAction())) {
+            java.time.LocalDate today = java.time.LocalDate.now();
+            List<Map<String, Object>> items = new ArrayList<>();
+            // (mã CTPM, mã phiếu, mã cuốn, tên sách, mượn cách đây N ngày, hạn trả sau N ngày, số lần gia hạn)
+            Object[][] samples = {
+                {50, 101, "BS-1-02", "Clean Code", 10, 4, 0},
+                {51, 101, "BS-2-01", "Java Core", 20, -2, 1},
+                {52, 102, "BS-3-01", "Doraemon", 3, 11, 0},
+                {53, 103, "BS-4-02", "C++ Programming", 13, 1, 2},
+            };
+            for (Object[] x : samples) {
+                int daysLeft = (Integer) x[5];
+                Map<String, Object> it = new LinkedHashMap<>();
+                it.put("maCTPM", x[0]);
+                it.put("maPhieuMuon", x[1]);
+                it.put("maThe", 1);
+                it.put("tenDocGia", "Độc giả giả lập");
+                it.put("maCuonSach", x[2]);
+                it.put("tenSach", x[3]);
+                it.put("ngayMuon", today.minusDays((Integer) x[4]).atTime(9, 30).toString() + ":00");
+                it.put("ngayHenTra", today.plusDays(daysLeft).toString());
+                it.put("soLanGiaHan", x[6]);
+                it.put("quaHan", daysLeft < 0);
+                it.put("soNgayTre", daysLeft < 0 ? -daysLeft : 0);
+                it.put("tienPhatDuKien", daysLeft < 0 ? -daysLeft * 5000.0 : 0.0);
+                it.put("coTheGiaHan", false);
+                items.add(it);
+            }
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("tab", "BORROWING");
+            data.put("totalResults", items.size());
+            data.put("page", 1);
+            data.put("pageSize", 100);
+            data.put("totalPages", 1);
+            data.put("items", items);
+            return mapper.writeValueAsString(new Response("SUCCESS", "Tải lịch sử mượn trả thành công", data));
         }
 
         if ("SEARCH_BOOKS".equals(req.getAction())) {

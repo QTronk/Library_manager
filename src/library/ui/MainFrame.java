@@ -20,6 +20,7 @@ public class MainFrame extends JFrame {
     private static final String CARD_SEARCH = "SEARCH";
     private static final String CARD_LOGIN = "LOGIN";
     private static final String CARD_BORROW = "BORROW";
+    private static final String CARD_HISTORY = "HISTORY";
 
     // Header Components
     private JPanel headerRightPanel;
@@ -50,6 +51,8 @@ public class MainFrame extends JFrame {
     private JButton currentActiveButton = null;
 
     private User currentUser = null;
+
+    private BorrowHistoryPanel historyPanel; // Giữ tham chiếu để xóa dữ liệu khi đăng xuất
 
     public MainFrame() {
         setTitle("Library Management System");
@@ -161,6 +164,8 @@ public class MainFrame extends JFrame {
         contentPanel.add(createHomePanel(), CARD_HOME);
         contentPanel.add(new SearchBookPanel(), CARD_SEARCH);
         contentPanel.add(new BorrowTicketPanel(), CARD_BORROW);
+        historyPanel = new BorrowHistoryPanel();
+        contentPanel.add(historyPanel, CARD_HISTORY);
 
         LoginPanel loginPanel = new LoginPanel(new LoginPanel.LoginListener() {
             @Override
@@ -184,7 +189,7 @@ public class MainFrame extends JFrame {
         homeButton.addActionListener(e -> navigateTo(homeButton, CARD_HOME));
         searchButton.addActionListener(e -> navigateTo(searchButton, CARD_SEARCH));
         
-        historyButton.addActionListener(e -> navigateTo(historyButton, CARD_HOME));
+        historyButton.addActionListener(e -> navigateTo(historyButton, CARD_HISTORY));
         approveRenewButton.addActionListener(e -> navigateTo(approveRenewButton, CARD_HOME));
         approveBorrowButton.addActionListener(e -> navigateTo(approveBorrowButton, CARD_BORROW));
         returnBookButton.addActionListener(e -> navigateTo(returnBookButton, CARD_HOME));
@@ -310,6 +315,7 @@ public class MainFrame extends JFrame {
 
     private void handleLogout() {
         currentUser = null;
+        historyPanel.clear(); // Không để người đăng nhập sau thấy dữ liệu của người trước
 
         // Báo Backend xóa phiên đăng nhập của kết nối (chạy nền, không chặn giao diện)
         new SwingWorker<Void, Void>() {
