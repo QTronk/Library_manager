@@ -4,6 +4,7 @@ import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLightLaf;
 import com.formdev.flatlaf.FlatLaf;
 import library.model.User;
+import library.service.SocketClient;
 
 import javax.swing.*;
 import java.awt.*;
@@ -18,6 +19,7 @@ public class MainFrame extends JFrame {
     private static final String CARD_HOME = "HOME";
     private static final String CARD_SEARCH = "SEARCH";
     private static final String CARD_LOGIN = "LOGIN";
+    private static final String CARD_BORROW = "BORROW";
 
     // Header Components
     private JPanel headerRightPanel;
@@ -139,7 +141,7 @@ public class MainFrame extends JFrame {
         historyButton = createMenuButton("Lịch sử mượn");
 
         approveRenewButton = createMenuButton("Duyệt gia hạn sách");
-        approveBorrowButton = createMenuButton("Duyệt / Lập phiếu mượn");
+        approveBorrowButton = createMenuButton("Lập phiếu mượn");
         returnBookButton = createMenuButton("Trả sách");
         manageStockButton = createMenuButton("Quản lý kho sách");
         manageReaderButton = createMenuButton("Quản lý độc giả");
@@ -158,6 +160,7 @@ public class MainFrame extends JFrame {
 
         contentPanel.add(createHomePanel(), CARD_HOME);
         contentPanel.add(new SearchBookPanel(), CARD_SEARCH);
+        contentPanel.add(new BorrowTicketPanel(), CARD_BORROW);
 
         LoginPanel loginPanel = new LoginPanel(new LoginPanel.LoginListener() {
             @Override
@@ -183,7 +186,7 @@ public class MainFrame extends JFrame {
         
         historyButton.addActionListener(e -> navigateTo(historyButton, CARD_HOME));
         approveRenewButton.addActionListener(e -> navigateTo(approveRenewButton, CARD_HOME));
-        approveBorrowButton.addActionListener(e -> navigateTo(approveBorrowButton, CARD_HOME));
+        approveBorrowButton.addActionListener(e -> navigateTo(approveBorrowButton, CARD_BORROW));
         returnBookButton.addActionListener(e -> navigateTo(returnBookButton, CARD_HOME));
         manageStockButton.addActionListener(e -> navigateTo(manageStockButton, CARD_HOME));
         manageReaderButton.addActionListener(e -> navigateTo(manageReaderButton, CARD_HOME));
@@ -307,6 +310,15 @@ public class MainFrame extends JFrame {
 
     private void handleLogout() {
         currentUser = null;
+
+        // Báo Backend xóa phiên đăng nhập của kết nối (chạy nền, không chặn giao diện)
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() {
+                SocketClient.getInstance().logout();
+                return null;
+            }
+        }.execute();
 
         headerRightPanel.removeAll();
         headerRightPanel.add(themeToggleButton);

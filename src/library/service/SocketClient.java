@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import library.model.Book;
+import library.model.BorrowTicketResult;
 import library.model.Request;
 import library.model.Response;
 import library.model.User;
@@ -29,6 +30,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 
 public class SocketClient {
     private static SocketClient instance;
@@ -43,8 +45,9 @@ public class SocketClient {
     private static final int CONNECT_TIMEOUT_MS = 5_000;
     private static final int READ_TIMEOUT_MS = 15_000;
 
-    // Backend phân trang SEARCH_BOOKS (mặc định 10 sách/trang). Mình xin trang lớn và tự lặp cho đến khi hết.
-    private static final int BOOK_PAGE_SIZE = 500;
+    // Backend phân trang SEARCH_BOOKS và giới hạn pageSize tối đa 100 (JsonParams.pageSizeOf).
+    // Mình xin đúng 100 sách/trang và tự lặp theo totalPages cho đến khi hết.
+    private static final int BOOK_PAGE_SIZE = 100;
     private static final int MAX_BOOK_PAGES = 100; // chốt chặn an toàn, tránh lặp vô hạn
 
     // Khối static tự động chạy để đọc file config.properties ngay khi class được nạp
@@ -110,6 +113,19 @@ public class SocketClient {
         }
     }
 
+    // ----- Kết nối Socket bền vững -----
+    // Backend lưu phiên đăng nhập THEO TỪNG KẾT NỐI TCP (mỗi ClientHandler có 1 RequestRouter riêng),
+    // nên toàn bộ ứng dụng phải dùng chung MỘT kết nối và giữ mở suốt thời gian chạy.
+    // Mở socket mới cho mỗi request thì sau LOGIN mọi action khác đều bị UNAUTHORIZED.
+    private Socket socket;
+    private BufferedReader reader;
+    private PrintWriter writer;
+
+    // Chỉ những action chỉ-đọc mới được tự gửi lại khi phát hiện kết nối cũ đã chết
+    // (gửi lại action ghi dữ liệu có thể làm nghiệp vụ chạy 2 lần).
+    private static final Set<String> SAFE_TO_RETRY =
+            Set.of("LOGIN", "SEARCH_BOOKS", "GET_BOOK_DETAIL", "GET_CATEGORIES");
+
     private SocketClient() {
         this.mapper = new ObjectMapper();
     }
@@ -137,11 +153,51 @@ public class SocketClient {
             // Chuyển dữ liệu payload nhận được về đối tượng User
             String userJson = mapper.writeValueAsString(response.getData());
             User user = mapper.readValue(userJson, User.class);
-            user.setRole(normalizeRole(user.getRole()));
+            user.setRole(resolveRole(user));
             return user;
         }
 
         throw new Exception(describeFailure(response, "Đăng nhập thất bại!"));
+    }
+
+    /**
+     * Gọi action LOGOUT để Backend xóa phiên của kết nối hiện tại.
+     * Do kết nối được giữ mở nên bắt buộc phải báo cho Backend, nếu không phiên cũ vẫn còn hiệu lực.
+     * Lỗi (mất mạng...) được bỏ qua vì phía giao diện vẫn đăng xuất bình thường.
+     */
+    public void logout() {
+        try {
+            sendRequest("LOGOUT", null);
+        } catch (Exception ignored) {
+            // Best-effort
+        }
+    }
+
+    /**
+     * Gọi action CREATE_BORROW_TICKET (UC-01): thủ thư lập phiếu mượn cho độc giả.
+     * Hiện giao diện chỉ lập 1 phiếu cho 1 cuốn sách, nhưng API nhận danh sách mã vạch nên
+     * sau này mở rộng nhiều cuốn chỉ cần truyền thêm phần tử vào danhSachMaCuonSach.
+     *
+     * Không nằm trong SAFE_TO_RETRY: action ghi dữ liệu nên tuyệt đối không tự gửi lại khi lỗi kết nối.
+     */
+    public BorrowTicketResult createBorrowTicket(int maThe, String maCuonSach) throws Exception {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("maThe", maThe);
+        payload.put("danhSachMaCuonSach", List.of(maCuonSach));
+
+        Response response = sendRequest("CREATE_BORROW_TICKET", payload);
+
+        if (!"SUCCESS".equalsIgnoreCase(response.getStatus()) || response.getData() == null) {
+            throw new Exception(describeFailure(response, "Lập phiếu mượn thất bại!"));
+        }
+
+        String dataJson = mapper.writeValueAsString(response.getData());
+        return mapper.readValue(dataJson, BorrowTicketResult.class);
+    }
+
+    /** Đóng kết nối tới Backend (gọi khi thoát ứng dụng nếu cần). */
+    public synchronized void disconnect() {
+        closeConnection();
     }
 
     /**
@@ -171,7 +227,8 @@ public class SocketClient {
             if (result.books == null) break;
 
             all.addAll(result.books);
-            if (result.books.size() < BOOK_PAGE_SIZE) break; // trang cuối
+            if (result.books.size() < BOOK_PAGE_SIZE) break;              // trang cuối (thiếu sách)
+            if (result.totalPages > 0 && page >= result.totalPages) break; // đã qua trang cuối theo Backend
         }
         return all;
     }
@@ -180,6 +237,7 @@ public class SocketClient {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class BookSearchData {
         public int totalResults;
+        public int totalPages;
         public List<Book> books = new ArrayList<>();
     }
 
@@ -188,6 +246,23 @@ public class SocketClient {
      * còn MainFrame/UserDropdownPanel so sánh với "ADMIN", "LIBRARIAN", "READER".
      * Hàm này quy về 3 giá trị mà giao diện đang dùng.
      */
+    /**
+     * Ưu tiên maVaiTro (1 = Admin, 2 = Thủ thư, 3 = Độc giả) vì API.md khuyến nghị phân quyền theo mã,
+     * không so chuỗi tên vai trò. Nếu thiếu maVaiTro (chế độ Mock) thì dùng chuỗi role.
+     */
+    private static String resolveRole(User user) {
+        Integer maVaiTro = user.getMaVaiTro();
+        if (maVaiTro != null) {
+            switch (maVaiTro) {
+                case 1: return "ADMIN";
+                case 2: return "LIBRARIAN";
+                case 3: return "READER";
+                default: break;
+            }
+        }
+        return normalizeRole(user.getRole());
+    }
+
     private static String normalizeRole(String role) {
         if (role == null) return "READER";
         switch (role.trim().toUpperCase(Locale.ROOT)) {
@@ -221,7 +296,7 @@ public class SocketClient {
             jsonResponse = mockServerProcess(jsonRequest);
         } else {
             // CHẾ ĐỘ 2: Bắn gói tin JSON qua Socket kết nối tới Backend thật
-            jsonResponse = sendOverSocket(jsonRequest);
+            jsonResponse = sendOverSocket(action, jsonRequest);
         }
 
         // Giải mã chuỗi JSON Response thành đối tượng Response Java
@@ -233,37 +308,94 @@ public class SocketClient {
     }
 
     /**
-     * Bắn gói tin JSON qua Socket TCP/IP thật sang Backend.
-     * Giao thức (theo API_Method.md): mỗi thông điệp là 1 dòng JSON, mã hóa UTF-8.
+     * Gửi 1 dòng JSON qua kết nối Socket bền vững tới Backend và đọc 1 dòng JSON trả về.
+     * Giao thức (theo API.md): mỗi thông điệp là 1 dòng JSON, mã hóa UTF-8, kết thúc bằng '\n'.
+     *
+     * synchronized: nhiều SwingWorker có thể chạy cùng lúc nhưng chỉ có 1 kết nối, nên các request
+     * phải xếp hàng tuần tự (gửi 1 - nhận 1), nếu không phản hồi sẽ bị lẫn giữa các request.
      */
-    private String sendOverSocket(String jsonRequest) throws Exception {
+    private synchronized String sendOverSocket(String action, String jsonRequest) throws Exception {
         String address = SERVER_HOST + ":" + SERVER_PORT;
-        String response;
+        boolean reusedConnection = socket != null && !socket.isClosed();
 
-        try (Socket socket = new Socket()) {
-            socket.connect(new InetSocketAddress(SERVER_HOST, SERVER_PORT), CONNECT_TIMEOUT_MS);
-            socket.setSoTimeout(READ_TIMEOUT_MS);
-
-            // Bắt buộc UTF-8 (Backend dùng UTF-8) để tiếng Việt không bị lỗi font
-            PrintWriter out = new PrintWriter(
-                    new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true);
-            BufferedReader in = new BufferedReader(
-                    new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
-
-            out.println(jsonRequest);
-            response = in.readLine();
-
+        try {
+            return exchange(jsonRequest, address);
         } catch (SocketTimeoutException ex) {
+            // Quá hạn chờ: phản hồi có thể đến muộn và làm lệch cặp request/response -> bỏ kết nối này
+            closeConnection();
             throw new IOException("Backend (" + address + ") không phản hồi kịp thời. Vui lòng thử lại.", ex);
         } catch (IOException ex) {
-            throw new IOException("Không kết nối được tới Backend (" + address + "). "
-                    + "Hãy kiểm tra Backend đã chạy chưa và host/port trong config.properties.", ex);
+            closeConnection();
+
+            // Kết nối cũ đã chết (vd. Backend vừa khởi động lại): tự nối lại và gửi lại 1 lần,
+            // nhưng chỉ với action chỉ-đọc.
+            if (reusedConnection && SAFE_TO_RETRY.contains(action)) {
+                try {
+                    return exchange(jsonRequest, address);
+                } catch (IOException retryEx) {
+                    closeConnection();
+                    throw retryEx;
+                }
+            }
+            throw ex;
+        }
+    }
+
+    /** Gửi 1 request, đọc 1 response trên kết nối hiện tại (tự mở kết nối nếu chưa có). */
+    private String exchange(String jsonRequest, String address) throws IOException {
+        ensureConnected(address);
+
+        String response;
+        try {
+            writer.println(jsonRequest);
+            if (writer.checkError()) { // PrintWriter nuốt lỗi ghi, phải tự kiểm tra
+                throw new IOException("Không gửi được dữ liệu tới Backend.");
+            }
+            response = reader.readLine();
+        } catch (SocketTimeoutException ex) {
+            throw ex; // để sendOverSocket xử lý riêng
+        } catch (IOException ex) {
+            throw new IOException("Mất kết nối tới Backend (" + address + "). Vui lòng thử lại.", ex);
         }
 
         if (response == null || response.trim().isEmpty()) {
-            throw new IOException("Backend (" + address + ") đóng kết nối mà không trả lời!");
+            throw new IOException("Backend (" + address + ") đã đóng kết nối mà không trả lời!");
         }
         return response;
+    }
+
+    private void ensureConnected(String address) throws IOException {
+        if (socket != null && !socket.isClosed() && socket.isConnected()) {
+            return;
+        }
+        closeConnection();
+
+        Socket newSocket = new Socket();
+        try {
+            newSocket.connect(new InetSocketAddress(SERVER_HOST, SERVER_PORT), CONNECT_TIMEOUT_MS);
+            newSocket.setSoTimeout(READ_TIMEOUT_MS);
+            newSocket.setKeepAlive(true);
+
+            // Bắt buộc UTF-8 (Backend dùng UTF-8) để tiếng Việt không bị lỗi font
+            reader = new BufferedReader(new InputStreamReader(newSocket.getInputStream(), StandardCharsets.UTF_8));
+            writer = new PrintWriter(new OutputStreamWriter(newSocket.getOutputStream(), StandardCharsets.UTF_8), true);
+            socket = newSocket;
+        } catch (IOException ex) {
+            try { newSocket.close(); } catch (IOException ignored) { }
+            reader = null;
+            writer = null;
+            throw new IOException("Không kết nối được tới Backend (" + address + "). "
+                    + "Hãy kiểm tra Backend đã chạy chưa và host/port trong config.properties.", ex);
+        }
+    }
+
+    private void closeConnection() {
+        if (socket != null) {
+            try { socket.close(); } catch (IOException ignored) { }
+        }
+        socket = null;
+        reader = null;
+        writer = null;
     }
 
     /**
@@ -295,6 +427,43 @@ public class SocketClient {
                 res.setData(null);
             }
             return mapper.writeValueAsString(res);
+        }
+
+        if ("LOGOUT".equals(req.getAction())) {
+            return mapper.writeValueAsString(new Response("SUCCESS", "Đăng xuất thành công", null));
+        }
+
+        if ("CREATE_BORROW_TICKET".equals(req.getAction())) {
+            Map<String, Object> params = mapper.readValue(
+                mapper.writeValueAsString(req.getData()),
+                new TypeReference<Map<String, Object>>() {}
+            );
+            Object codes = params.get("danhSachMaCuonSach");
+            String code = (codes instanceof List && !((List<?>) codes).isEmpty())
+                    ? String.valueOf(((List<?>) codes).get(0)) : "";
+            Object maTheObj = params.get("maThe");
+            int maThe = (maTheObj instanceof Number) ? ((Number) maTheObj).intValue() : 0;
+
+            if (code.isEmpty()) {
+                return mapper.writeValueAsString(new Response("BAD_REQUEST", "Danh sách cuốn sách trống!", null));
+            }
+            // Mã vạch "BAD" luôn thất bại để test luồng báo lỗi trên giao diện
+            if ("BAD".equalsIgnoreCase(code)) {
+                return mapper.writeValueAsString(new Response("ERROR", "Cuốn sách không sẵn sàng để mượn: " + code, null));
+            }
+
+            Map<String, Object> line = new LinkedHashMap<>();
+            line.put("maCTPM", 50);
+            line.put("maCuonSach", code);
+            line.put("tenSach", "Sách giả lập (" + code + ")");
+            line.put("ngayHenTra", java.time.LocalDate.now().plusDays(14).toString());
+
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("maPhieuMuon", 101);
+            data.put("maThe", maThe);
+            data.put("ngayMuon", java.time.LocalDateTime.now().withNano(0).toString());
+            data.put("chiTiet", List.of(line));
+            return mapper.writeValueAsString(new Response("SUCCESS", "Lập phiếu mượn thành công!", data));
         }
 
         if ("SEARCH_BOOKS".equals(req.getAction())) {

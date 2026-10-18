@@ -7,7 +7,7 @@ import java.io.Serializable;
 /**
  * Thông tin người dùng sau khi đăng nhập.
  * Khớp với JSON mà Backend trả về cho action LOGIN:
- * { maND, fullName, email, phone, role, maThe, trangThaiThe }
+ * { maND, fullName, email, phone, maVaiTro, role, maThe, trangThaiThe, ngayHetHanThe }
  *
  * ignoreUnknown = true: nếu Backend thêm field mới thì giao diện không bị lỗi parse.
  */
@@ -18,9 +18,11 @@ public class User implements Serializable {
     private String fullName;
     private String email;
     private String phone;
+    private Integer maVaiTro;     // 1 = Admin, 2 = Thủ thư, 3 = Độc giả (nguồn chính để xác định role)
     private String role;          // Đã chuẩn hóa về "ADMIN", "LIBRARIAN", "READER" (xem SocketClient.normalizeRole)
     private Integer maThe;        // -1 nếu người dùng chưa có thẻ độc giả
     private String trangThaiThe;  // "NONE" nếu chưa có thẻ
+    private String ngayHetHanThe; // yyyy-MM-dd, null nếu chưa có thẻ
 
     public User() {}
 
@@ -45,6 +47,9 @@ public class User implements Serializable {
     public String getPhone() { return phone; }
     public void setPhone(String phone) { this.phone = phone; }
 
+    public Integer getMaVaiTro() { return maVaiTro; }
+    public void setMaVaiTro(Integer maVaiTro) { this.maVaiTro = maVaiTro; }
+
     public String getRole() { return role; }
     public void setRole(String role) { this.role = role; }
 
@@ -53,4 +58,7 @@ public class User implements Serializable {
 
     public String getTrangThaiThe() { return trangThaiThe; }
     public void setTrangThaiThe(String trangThaiThe) { this.trangThaiThe = trangThaiThe; }
+
+    public String getNgayHetHanThe() { return ngayHetHanThe; }
+    public void setNgayHetHanThe(String ngayHetHanThe) { this.ngayHetHanThe = ngayHetHanThe; }
 }
