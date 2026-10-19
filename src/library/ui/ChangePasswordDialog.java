@@ -114,6 +114,7 @@ public class ChangePasswordDialog extends JDialog {
 
     private void showError(String message) {
         errorLabel.setText(message == null || message.isEmpty() ? " " : message);
+        UiUtil.refit(this); // Dòng lỗi dài có thể làm hộp thoại cần rộng hơn
     }
 
     /** Kiểm tra ở Client theo cùng thứ tự với Backend; trả về thông báo lỗi hoặc null nếu hợp lệ. */

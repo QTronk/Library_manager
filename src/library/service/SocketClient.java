@@ -7,6 +7,7 @@ import library.model.Book;
 import library.model.AddReaderResult;
 import library.model.BorrowHistoryResult;
 import library.model.BorrowTicketResult;
+import library.model.CardUpdateResult;
 import library.model.ReturnBookResult;
 import library.model.SystemConfig;
 import library.model.UserListResult;
@@ -145,6 +146,49 @@ public class SocketClient {
     // Bộ đếm mã giả lập khi tạo thẻ độc giả ở chế độ Mock
     private int mockNextUserId = 501;
     private int mockNextCardId = 486;
+
+    // Danh sách người dùng giả lập (có lưu lại để thử luồng sửa thông tin / sửa thẻ ở chế độ Mock)
+    private final List<Map<String, Object>> mockLibrarians = new ArrayList<>();
+    private final List<Map<String, Object>> mockReaders = new ArrayList<>();
+    {
+        mockLibrarians.add(mockLibrarian(6, "Trần Thị Mai", "user6@thuvien.edu.vn", "0900000006", true));
+        mockLibrarians.add(mockLibrarian(7, "Lê Văn Cường", "user7@thuvien.edu.vn", "0900000007", true));
+        mockLibrarians.add(mockLibrarian(8, "Phạm Thị Hoa", "user8@thuvien.edu.vn", "0900000008", false));
+
+        mockReaders.add(mockReader(16, "Nguyễn Văn An", "user16@thuvien.edu.vn", "0912345678",
+                1, "2026-01-01", "2027-01-01", "ACTIVE", 2));
+        mockReaders.add(mockReader(17, "Trần Thị Bình", "user17@thuvien.edu.vn", "0912345679",
+                2, "2026-01-01", "2027-01-01", "LOCKED", 0));
+        mockReaders.add(mockReader(18, "Lê Minh Châu", "user18@thuvien.edu.vn", "0912345680",
+                3, "2025-01-01", "2025-12-31", "EXPIRED", 1));
+    }
+
+    private static Map<String, Object> mockLibrarian(int maND, String hoTen, String email, String sdt, boolean active) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("maND", maND);
+        m.put("hoTen", hoTen);
+        m.put("email", email);
+        m.put("soDienThoai", sdt);
+        m.put("trangThai", active);
+        return m;
+    }
+
+    private static Map<String, Object> mockReader(int maND, String hoTen, String email, String sdt, int maThe,
+                                                  String ngayCap, String ngayHetHan, String trangThaiThe, int dangMuon) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("maND", maND);
+        m.put("hoTen", hoTen);
+        m.put("email", email);
+        m.put("soDienThoai", sdt);
+        m.put("trangThaiTaiKhoan", true);
+        m.put("maThe", maThe);
+        m.put("ngayCap", ngayCap);
+        m.put("ngayHetHan", ngayHetHan);
+        m.put("trangThaiThe", trangThaiThe);   // Trạng thái hiển thị: ACTIVE | LOCKED | EXPIRED
+        m.put("dangMuon", dangMuon);
+        m.put("_trangThaiDb", "LOCKED".equals(trangThaiThe) ? "LOCKED" : "ACTIVE"); // Trạng thái lưu trong CSDL (ẩn khi trả về)
+        return m;
+    }
 
     private SocketClient() {
         this.mapper = new ObjectMapper();
@@ -346,22 +390,34 @@ public class SocketClient {
 
     /** UC-15: danh sách Thủ thư (quyền ADMIN). keyword có thể rỗng. */
     public List<UserListResult.Item> getLibrarians(String keyword) throws Exception {
-        return fetchUsers("GET_LIBRARIANS", keyword);
+        return fetchUsers("GET_LIBRARIANS", keyword, null);
     }
 
     /** UC-11: danh sách Độc giả (theo phân quyền hiện tại của Backend chỉ Thủ thư gọi được). */
     public List<UserListResult.Item> getReaders(String keyword) throws Exception {
-        return fetchUsers("GET_READERS", keyword);
+        return fetchUsers("GET_READERS", keyword, null);
+    }
+
+    /**
+     * UC-11: danh sách Độc giả có lọc theo trạng thái thẻ (Thủ thư).
+     *
+     * @param trangThaiThe null/rỗng = tất cả; hoặc "ACTIVE" | "LOCKED" | "EXPIRED"
+     */
+    public List<UserListResult.Item> getReaders(String keyword, String trangThaiThe) throws Exception {
+        return fetchUsers("GET_READERS", keyword, trangThaiThe);
     }
 
     /** Gọi nhiều trang cho đến khi lấy hết danh sách người dùng. */
-    private List<UserListResult.Item> fetchUsers(String action, String keyword) throws Exception {
+    private List<UserListResult.Item> fetchUsers(String action, String keyword, String trangThaiThe) throws Exception {
         List<UserListResult.Item> all = new ArrayList<>();
 
         for (int page = 1; page <= MAX_BOOK_PAGES; page++) {
             Map<String, Object> payload = new HashMap<>();
             if (keyword != null && !keyword.trim().isEmpty()) {
                 payload.put("keyword", keyword.trim());
+            }
+            if (trangThaiThe != null && !trangThaiThe.isEmpty()) {
+                payload.put("trangThaiThe", trangThaiThe);
             }
             payload.put("page", page);
             payload.put("pageSize", BOOK_PAGE_SIZE);
@@ -457,6 +513,47 @@ public class SocketClient {
             throw new Exception(describeFailure(response, "Cấp thẻ độc giả thất bại!"));
         }
         return mapper.readValue(mapper.writeValueAsString(response.getData()), AddReaderResult.class);
+    }
+
+    /**
+     * UC-11: sửa thông tin độc giả (UPDATE_READER). Trường nào null thì không gửi (Backend giữ nguyên).
+     * Không nằm trong SAFE_TO_RETRY vì là action ghi dữ liệu.
+     *
+     * @return thông báo của Backend
+     */
+    public String updateReader(int maND, String hoTen, String email, String soDienThoai) throws Exception {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("maND", maND);
+        if (hoTen != null) payload.put("hoTen", hoTen);
+        if (email != null) payload.put("email", email);
+        if (soDienThoai != null) payload.put("soDienThoai", soDienThoai);
+
+        Response response = sendRequest("UPDATE_READER", payload);
+
+        if (!"SUCCESS".equalsIgnoreCase(response.getStatus())) {
+            throw new Exception(describeFailure(response, "Cập nhật thông tin độc giả thất bại!"));
+        }
+        return response.getMessage() != null ? response.getMessage() : "Cập nhật thông tin độc giả thành công!";
+    }
+
+    /**
+     * UC-11: gia hạn / khóa / mở khóa thẻ độc giả (UPDATE_CARD). Cần ít nhất một trong hai tham số.
+     *
+     * @param ngayHetHanIso yyyy-MM-dd, hoặc null nếu không đổi
+     * @param trangThai     "ACTIVE" | "LOCKED", hoặc null nếu không đổi
+     */
+    public CardUpdateResult updateCard(int maThe, String ngayHetHanIso, String trangThai) throws Exception {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("maThe", maThe);
+        if (ngayHetHanIso != null) payload.put("ngayHetHan", ngayHetHanIso);
+        if (trangThai != null) payload.put("trangThai", trangThai);
+
+        Response response = sendRequest("UPDATE_CARD", payload);
+
+        if (!"SUCCESS".equalsIgnoreCase(response.getStatus()) || response.getData() == null) {
+            throw new Exception(describeFailure(response, "Cập nhật thẻ độc giả thất bại!"));
+        }
+        return mapper.readValue(mapper.writeValueAsString(response.getData()), CardUpdateResult.class);
     }
 
     /** Đóng kết nối tới Backend (gọi khi thoát ứng dụng nếu cần). */
@@ -876,46 +973,25 @@ public class SocketClient {
         if ("GET_LIBRARIANS".equals(req.getAction()) || "GET_READERS".equals(req.getAction())) {
             boolean librarians = "GET_LIBRARIANS".equals(req.getAction());
             String kw = "";
+            String statusFilter = "";
             if (req.getData() != null) {
                 Map<String, Object> prm = mapper.readValue(
                     mapper.writeValueAsString(req.getData()),
                     new TypeReference<Map<String, Object>>() {}
                 );
                 if (prm.get("keyword") != null) kw = String.valueOf(prm.get("keyword")).toLowerCase();
+                if (prm.get("trangThaiThe") != null) statusFilter = String.valueOf(prm.get("trangThaiThe"));
             }
 
             List<Map<String, Object>> items = new ArrayList<>();
-            Object[][] users = librarians
-                ? new Object[][]{
-                    {6, "Trần Thị Mai", "user6@thuvien.edu.vn", "0900000006", true},
-                    {7, "Lê Văn Cường", "user7@thuvien.edu.vn", "0900000007", true},
-                    {8, "Phạm Thị Hoa", "user8@thuvien.edu.vn", "0900000008", false},
-                  }
-                : new Object[][]{
-                    {16, "Nguyễn Văn An", "user16@thuvien.edu.vn", "0912345678", true, 1, "ACTIVE", 2},
-                    {17, "Trần Thị Bình", "user17@thuvien.edu.vn", "0912345679", true, 2, "LOCKED", 0},
-                    {18, "Lê Minh Châu", "user18@thuvien.edu.vn", "0912345680", true, 3, "EXPIRED", 1},
-                  };
-            for (Object[] u : users) {
-                String hay = (u[1] + " " + u[2] + " " + u[3]).toLowerCase();
+            for (Map<String, Object> u : (librarians ? mockLibrarians : mockReaders)) {
+                String hay = (u.get("hoTen") + " " + u.get("email") + " " + u.get("soDienThoai")).toLowerCase();
                 if (!kw.isEmpty() && !hay.contains(kw)) continue;
+                if (!librarians && !statusFilter.isEmpty() && !statusFilter.equals(u.get("trangThaiThe"))) continue;
 
-                Map<String, Object> it = new LinkedHashMap<>();
-                it.put("maND", u[0]);
-                it.put("hoTen", u[1]);
-                it.put("email", u[2]);
-                it.put("soDienThoai", u[3]);
-                if (librarians) {
-                    it.put("trangThai", u[4]);
-                } else {
-                    it.put("trangThaiTaiKhoan", u[4]);
-                    it.put("maThe", u[5]);
-                    it.put("ngayCap", "2026-01-01");
-                    it.put("ngayHetHan", "2027-01-01");
-                    it.put("trangThaiThe", u[6]);
-                    it.put("dangMuon", u[7]);
-                }
-                items.add(it);
+                Map<String, Object> copy = new LinkedHashMap<>(u);
+                copy.remove("_trangThaiDb");
+                items.add(copy);
             }
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("totalResults", items.size());
@@ -925,6 +1001,74 @@ public class SocketClient {
             data.put("items", items);
             return mapper.writeValueAsString(new Response("SUCCESS",
                 librarians ? "Tải danh sách thủ thư thành công" : "Tải danh sách độc giả thành công", data));
+        }
+
+        if ("UPDATE_READER".equals(req.getAction())) {
+            Map<String, Object> params = mapper.readValue(
+                mapper.writeValueAsString(req.getData()),
+                new TypeReference<Map<String, Object>>() {}
+            );
+            int maND = (params.get("maND") instanceof Number) ? ((Number) params.get("maND")).intValue() : -1;
+            Map<String, Object> target = null;
+            for (Map<String, Object> r : mockReaders) {
+                if (((Number) r.get("maND")).intValue() == maND) target = r;
+            }
+            if (target == null) {
+                return mapper.writeValueAsString(new Response("ERROR", "Không tìm thấy độc giả mã: " + maND, null));
+            }
+            // Báo trùng email / số điện thoại với độc giả khác
+            for (Map<String, Object> r : mockReaders) {
+                if (r == target) continue;
+                if ((params.get("email") != null && params.get("email").equals(r.get("email")))
+                        || (params.get("soDienThoai") != null && params.get("soDienThoai").equals(r.get("soDienThoai")))) {
+                    return mapper.writeValueAsString(new Response("ERROR",
+                        "Email hoặc Số điện thoại đã tồn tại trên hệ thống", null));
+                }
+            }
+            for (String key : new String[]{"hoTen", "email", "soDienThoai"}) {
+                if (params.get(key) != null) target.put(key, params.get(key));
+            }
+            return mapper.writeValueAsString(new Response("SUCCESS", "Cập nhật thông tin độc giả thành công!", null));
+        }
+
+        if ("UPDATE_CARD".equals(req.getAction())) {
+            Map<String, Object> params = mapper.readValue(
+                mapper.writeValueAsString(req.getData()),
+                new TypeReference<Map<String, Object>>() {}
+            );
+            int maThe = (params.get("maThe") instanceof Number) ? ((Number) params.get("maThe")).intValue() : -1;
+            Object newExpiry = params.get("ngayHetHan");
+            Object newStatus = params.get("trangThai");
+            if (newExpiry == null && newStatus == null) {
+                return mapper.writeValueAsString(new Response("BAD_REQUEST", "Thiếu tham số: ngayHetHan | trangThai", null));
+            }
+            if (newStatus != null && !"ACTIVE".equals(newStatus) && !"LOCKED".equals(newStatus)) {
+                return mapper.writeValueAsString(new Response("BAD_REQUEST", "Thiếu hoặc sai tham số: trangThai", null));
+            }
+            Map<String, Object> target = null;
+            for (Map<String, Object> r : mockReaders) {
+                if (((Number) r.get("maThe")).intValue() == maThe) target = r;
+            }
+            if (target == null) {
+                return mapper.writeValueAsString(new Response("ERROR", "Không tìm thấy thẻ độc giả mã: " + maThe, null));
+            }
+            if (newExpiry != null && String.valueOf(newExpiry).compareTo(String.valueOf(target.get("ngayCap"))) <= 0) {
+                return mapper.writeValueAsString(new Response("BAD_REQUEST", "Ngày hết hạn phải sau ngày cấp", null));
+            }
+            if (newExpiry != null) target.put("ngayHetHan", newExpiry);
+            if (newStatus != null) target.put("_trangThaiDb", newStatus);
+
+            // Tính lại trạng thái hiển thị giống Backend: bị khóa -> LOCKED; quá hạn -> EXPIRED; còn lại ACTIVE
+            String db = String.valueOf(target.get("_trangThaiDb"));
+            boolean expired = String.valueOf(target.get("ngayHetHan")).compareTo(java.time.LocalDate.now().toString()) < 0;
+            target.put("trangThaiThe", "LOCKED".equals(db) ? "LOCKED" : (expired ? "EXPIRED" : "ACTIVE"));
+
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("maThe", maThe);
+            data.put("ngayCap", target.get("ngayCap"));
+            data.put("ngayHetHan", target.get("ngayHetHan"));
+            data.put("trangThai", db);
+            return mapper.writeValueAsString(new Response("SUCCESS", "Cập nhật thẻ độc giả thành công!", data));
         }
 
         if ("UPDATE_LIBRARIAN".equals(req.getAction())) {
@@ -975,9 +1119,17 @@ public class SocketClient {
                 return mapper.writeValueAsString(new Response("ERROR",
                     "Email hoặc Số điện thoại đã tồn tại trên hệ thống", null));
             }
+            int newUserId = mockNextUserId++;
+            int newCardId = mockNextCardId++;
+            String ngayCap = params.get("ngayCap") != null
+                    ? String.valueOf(params.get("ngayCap")) : java.time.LocalDate.now().toString();
+            mockReaders.add(mockReader(newUserId, String.valueOf(params.get("hoTen")), email,
+                    String.valueOf(params.get("soDienThoai")), newCardId, ngayCap,
+                    String.valueOf(params.get("ngayHetHan")), "ACTIVE", 0));
+
             Map<String, Object> data = new LinkedHashMap<>();
-            data.put("maND", mockNextUserId++);
-            data.put("maThe", mockNextCardId++);
+            data.put("maND", newUserId);
+            data.put("maThe", newCardId);
             return mapper.writeValueAsString(new Response("SUCCESS", "Cấp thẻ độc giả thành công!", data));
         }
 

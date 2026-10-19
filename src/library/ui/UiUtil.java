@@ -1,5 +1,7 @@
 package library.ui;
 
+import java.awt.Dimension;
+import java.awt.Window;
 import java.io.IOException;
 import java.text.NumberFormat;
 import java.time.LocalDate;
@@ -52,5 +54,23 @@ public final class UiUtil {
 
     public static boolean isConnectionProblem(Throwable cause) {
         return cause instanceof IOException;
+    }
+
+    /**
+     * Cho hộp thoại tự co/giãn lại nếu nội dung hiện tại cần chỗ lớn hơn kích thước đang có.
+     *
+     * Lý do: hộp thoại được pack() một lần lúc mở. Nếu sau đó nội dung đổi (dòng thông báo dài hơn,
+     * ô nhập có viền dày hơn...) khiến kích thước cần thiết lớn hơn cửa sổ, GridBagLayout sẽ chuyển sang
+     * dùng kích thước TỐI THIỂU của mọi thành phần: các ô nhập co lại chỉ còn vài pixel và không thấy chữ.
+     * Gọi hàm này sau mỗi lần đổi nội dung để tránh lỗi đó.
+     */
+    public static void refit(Window window) {
+        if (!window.isDisplayable()) return; // Chưa pack() lần đầu thì không cần
+        Dimension preferred = window.getPreferredSize();
+        Dimension current = window.getSize();
+        if (preferred.width > current.width || preferred.height > current.height) {
+            window.pack();
+            window.setLocationRelativeTo(window.getOwner());
+        }
     }
 }

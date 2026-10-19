@@ -167,6 +167,7 @@ public class CreateReaderDialog extends JDialog {
 
     private void showError(String message) {
         errorLabel.setText(message == null || message.isEmpty() ? " " : message);
+        UiUtil.refit(this); // Dòng lỗi dài có thể làm hộp thoại cần rộng hơn
     }
 
     private void fail(String message, JComponent field) {
