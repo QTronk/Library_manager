@@ -20,7 +20,10 @@ public class MainFrame extends JFrame {
     private static final String CARD_SEARCH = "SEARCH";
     private static final String CARD_LOGIN = "LOGIN";
     private static final String CARD_BORROW = "BORROW";
+    private static final String CARD_CARD_CHECK = "CARD_CHECK";
     private static final String CARD_HISTORY = "HISTORY";
+    private static final String CARD_FINES = "FINES";
+    private static final String CARD_FINE_MANAGE = "FINE_MANAGE";
     private static final String CARD_RETURN = "RETURN";
     private static final String CARD_ADMIN_USERS = "ADMIN_USERS";
     private static final String CARD_CONFIG = "CONFIG";
@@ -42,7 +45,10 @@ public class MainFrame extends JFrame {
 
     // Nút phân quyền Sidebar
     private JButton historyButton;
+    private JButton fineButton;
+    private JButton manageFineButton;
     private JButton approveBorrowButton;
+    private JButton checkCardButton;
     private JButton returnBookButton;
     private JButton manageStockButton;
     private JButton manageReaderButton;
@@ -56,6 +62,9 @@ public class MainFrame extends JFrame {
     private User currentUser = null;
 
     private BorrowHistoryPanel historyPanel; // Giữ tham chiếu để xóa dữ liệu khi đăng xuất
+    private CardCheckPanel cardCheckPanel;   // Tương tự: kết quả kiểm tra thẻ của Thủ thư
+    private FinePanel finePanel;             // Tương tự: phiếu phạt của Độc giả
+    private FineManagementPanel fineManagementPanel; // Tương tự: toàn bộ phiếu phạt của Thủ thư
     private AdminUsersPanel adminUsersPanel; // Tương tự: danh sách người dùng của Admin
     private ReaderManagementPanel readerPanel; // Tương tự: xóa danh sách thẻ vừa tạo khi đăng xuất
     private SystemConfigPanel configPanel;   // Tương tự: thoát chế độ sửa và xóa dữ liệu khi đăng xuất
@@ -149,9 +158,12 @@ public class MainFrame extends JFrame {
         searchButton = createMenuButton("Tra cứu sách");
 
         historyButton = createMenuButton("Lịch sử mượn");
+        fineButton = createMenuButton("Phiếu phạt");
 
         approveBorrowButton = createMenuButton("Lập phiếu mượn");
+        checkCardButton = createMenuButton("Kiểm tra thẻ");
         returnBookButton = createMenuButton("Trả sách");
+        manageFineButton = createMenuButton("Quản lý phiếu phạt");
         manageStockButton = createMenuButton("Quản lý kho sách");
         manageReaderButton = createMenuButton("Quản lý độc giả");
 
@@ -170,8 +182,14 @@ public class MainFrame extends JFrame {
         contentPanel.add(createHomePanel(), CARD_HOME);
         contentPanel.add(new SearchBookPanel(), CARD_SEARCH);
         contentPanel.add(new BorrowTicketPanel(), CARD_BORROW);
+        cardCheckPanel = new CardCheckPanel();
+        contentPanel.add(cardCheckPanel, CARD_CARD_CHECK);
         historyPanel = new BorrowHistoryPanel();
         contentPanel.add(historyPanel, CARD_HISTORY);
+        finePanel = new FinePanel();
+        contentPanel.add(finePanel, CARD_FINES);
+        fineManagementPanel = new FineManagementPanel();
+        contentPanel.add(fineManagementPanel, CARD_FINE_MANAGE);
         contentPanel.add(new ReturnBookPanel(), CARD_RETURN);
         adminUsersPanel = new AdminUsersPanel();
         contentPanel.add(adminUsersPanel, CARD_ADMIN_USERS);
@@ -203,13 +221,17 @@ public class MainFrame extends JFrame {
         searchButton.addActionListener(e -> navigateTo(searchButton, CARD_SEARCH));
         
         historyButton.addActionListener(e -> navigateTo(historyButton, CARD_HISTORY));
+        fineButton.addActionListener(e -> navigateTo(fineButton, CARD_FINES));
         approveBorrowButton.addActionListener(e -> navigateTo(approveBorrowButton, CARD_BORROW));
+        checkCardButton.addActionListener(e -> navigateTo(checkCardButton, CARD_CARD_CHECK));
         returnBookButton.addActionListener(e -> navigateTo(returnBookButton, CARD_RETURN));
+        manageFineButton.addActionListener(e -> navigateTo(manageFineButton, CARD_FINE_MANAGE));
         manageStockButton.addActionListener(e -> navigateTo(manageStockButton, CARD_HOME));
         manageReaderButton.addActionListener(e -> navigateTo(manageReaderButton, CARD_READERS));
 
-        reportButton.addActionListener(e -> navigateTo(reportButton, CARD_ADMIN_USERS));
-        manageAccountButton.addActionListener(e -> navigateTo(manageAccountButton, CARD_HOME));
+        // Thống kê & Báo cáo (UC-16) chưa làm: tạm trỏ về Trang chủ
+        reportButton.addActionListener(e -> navigateTo(reportButton, CARD_HOME));
+        manageAccountButton.addActionListener(e -> navigateTo(manageAccountButton, CARD_ADMIN_USERS));
         configButton.addActionListener(e -> navigateTo(configButton, CARD_CONFIG));
 
         loginButton.addActionListener(e -> {
@@ -339,6 +361,9 @@ public class MainFrame extends JFrame {
     private void handleLogout() {
         currentUser = null;
         historyPanel.clear(); // Không để người đăng nhập sau thấy dữ liệu của người trước
+        finePanel.clear();
+        cardCheckPanel.clear();
+        fineManagementPanel.clear();
         adminUsersPanel.clear();
         configPanel.reset();
         readerPanel.clear();
@@ -372,10 +397,13 @@ public class MainFrame extends JFrame {
 
         if ("READER".equals(role)) {
             addMenuButton(historyButton);
+            addMenuButton(fineButton);
         } 
         else if ("LIBRARIAN".equals(role)) {
             addMenuButton(approveBorrowButton);
+            addMenuButton(checkCardButton);
             addMenuButton(returnBookButton);
+            addMenuButton(manageFineButton);
             addMenuButton(manageStockButton);
             addMenuButton(manageReaderButton);
         } 

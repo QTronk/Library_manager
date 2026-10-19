@@ -7,7 +7,9 @@ import library.model.Book;
 import library.model.AddReaderResult;
 import library.model.BorrowHistoryResult;
 import library.model.BorrowTicketResult;
+import library.model.CardEligibilityResult;
 import library.model.CardUpdateResult;
+import library.model.FineListResult;
 import library.model.ReturnBookResult;
 import library.model.SystemConfig;
 import library.model.UserListResult;
@@ -131,7 +133,8 @@ public class SocketClient {
     // (gửi lại action ghi dữ liệu có thể làm nghiệp vụ chạy 2 lần).
     private static final Set<String> SAFE_TO_RETRY =
             Set.of("LOGIN", "SEARCH_BOOKS", "GET_BOOK_DETAIL", "GET_CATEGORIES",
-                   "GET_BORROW_HISTORY", "GET_LIBRARIANS", "GET_READERS", "GET_SYSTEM_CONFIG");
+                   "GET_BORROW_HISTORY", "GET_LIBRARIANS", "GET_READERS", "GET_SYSTEM_CONFIG", "GET_FINES",
+                   "CHECK_CARD_ELIGIBILITY");
 
     // Cấu hình giả lập (chỉ dùng ở chế độ Mock), có lưu lại để thử luồng Sửa -> Xác nhận
     private final Map<String, Object> mockConfig = new LinkedHashMap<>();
@@ -161,6 +164,8 @@ public class SocketClient {
                 2, "2026-01-01", "2027-01-01", "LOCKED", 0));
         mockReaders.add(mockReader(18, "Lê Minh Châu", "user18@thuvien.edu.vn", "0912345680",
                 3, "2025-01-01", "2025-12-31", "EXPIRED", 1));
+        mockReaders.add(mockReader(19, "Phạm Quốc Dũng", "user19@thuvien.edu.vn", "0912345681",
+                4, "2026-03-01", "2027-03-01", "ACTIVE", 1));
     }
 
     private static Map<String, Object> mockLibrarian(int maND, String hoTen, String email, String sdt, boolean active) {
@@ -188,6 +193,41 @@ public class SocketClient {
         m.put("dangMuon", dangMuon);
         m.put("_trangThaiDb", "LOCKED".equals(trangThaiThe) ? "LOCKED" : "ACTIVE"); // Trạng thái lưu trong CSDL (ẩn khi trả về)
         return m;
+    }
+
+    // Vai trò của người đang đăng nhập ở chế độ Mock (Backend thật lưu trong phiên của kết nối)
+    private String mockRole = null;
+    private static final int MOCK_READER_MA_THE = 1; // Thẻ của độc giả giả lập (khớp mockReaders)
+
+    // Danh sách phiếu phạt giả lập, có lưu lại để thử luồng Thu tiền (PAY_FINE) -> tải lại danh sách
+    private final List<Map<String, Object>> mockFines = new ArrayList<>();
+    {
+        // (mã phiếu, mã CTPM, mã cuốn, tên sách, mã thẻ, tên độc giả, lý do, số tiền, đã nộp, lập cách đây N ngày)
+        Object[][] samples = {
+            {10, 63, "BS-5-01", "Design Patterns", 2, "Trần Thị Bình", "Trễ hạn 7 ngày", 35000.0, false, 1},
+            {9, 60, "BS-6-03", "Giải tích 1", 3, "Lê Minh Châu", "Mất sách", 85000.0, false, 3},
+            {8, 51, "BS-2-01", "Java Core", 1, "Nguyễn Văn An", "Hỏng sách: Rách bìa", 30000.0, false, 2},
+            {7, 50, "BS-1-02", "Clean Code", 1, "Nguyễn Văn An", "Trễ hạn 3 ngày", 15000.0, false, 5},
+            {6, 44, "BS-2-02", "Java Core", 3, "Lê Minh Châu", "Trễ hạn 2 ngày", 10000.0, true, 25},
+            {5, 41, "BS-3-01", "Doraemon", 1, "Nguyễn Văn An", "Trễ hạn 1 ngày", 5000.0, true, 40},
+            {4, 33, "BS-7-01", "Dế Mèn phiêu lưu ký", 2, "Trần Thị Bình", "Hỏng sách: Mất trang", 45000.0, true, 60},
+            {3, 30, "BS-4-02", "C++ Programming", 1, "Nguyễn Văn An", "Mất sách", 120000.0, true, 90},
+        };
+        java.time.LocalDateTime now = java.time.LocalDateTime.now().withNano(0);
+        for (Object[] x : samples) {
+            Map<String, Object> it = new LinkedHashMap<>();
+            it.put("maPhieuPhat", x[0]);
+            it.put("maCTPM", x[1]);
+            it.put("maCuonSach", x[2]);
+            it.put("tenSach", x[3]);
+            it.put("maThe", x[4]);
+            it.put("tenDocGia", x[5]);
+            it.put("ngayLapPhieu", now.minusDays((Integer) x[9]).toString());
+            it.put("lyDo", x[6]);
+            it.put("soTienPhat", x[7]);
+            it.put("daThanhToan", x[8]);
+            mockFines.add(it);
+        }
     }
 
     private SocketClient() {
@@ -287,6 +327,96 @@ public class SocketClient {
             if (result.totalPages > 0 && page >= result.totalPages) break;
         }
         return all;
+    }
+
+    /**
+     * Gọi action GET_FINES (UC-14): Độc giả xem các phiếu phạt của chính mình (chỉ xem).
+     * Backend ép theo thẻ của người đang đăng nhập nên không gửi maThe. Lấy tất cả (cả đã nộp lẫn chưa nộp),
+     * tự gọi nhiều trang cho đến khi hết; việc lọc theo trạng thái nộp do giao diện làm.
+     *
+     * @return kết quả gộp mọi trang; tongChuaThanhToan lấy từ Backend (tổng toàn bộ phiếu chưa nộp)
+     */
+    public FineListResult getMyFines() throws Exception {
+        return fetchFines();
+    }
+
+    /**
+     * Gọi action GET_FINES (UC-14): Thủ thư xem TOÀN BỘ phiếu phạt của mọi độc giả (không gửi maThe).
+     * Cùng một request với {@link #getMyFines()}: phạm vi dữ liệu do Backend quyết định theo vai trò
+     * trong phiên đăng nhập (Độc giả chỉ thấy phiếu của thẻ mình, Thủ thư thấy tất cả).
+     */
+    public FineListResult getAllFines() throws Exception {
+        return fetchFines();
+    }
+
+    /**
+     * Gọi action PAY_FINE (UC-14): Thủ thư xác nhận ĐÃ THU tiền của một phiếu phạt.
+     *
+     * @return thông báo của Backend ("Thanh toán phiếu phạt thành công")
+     *
+     * Không nằm trong SAFE_TO_RETRY: action ghi dữ liệu nên không tự gửi lại khi lỗi kết nối.
+     */
+    public String payFine(int maPhieuPhat) throws Exception {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("maPhieuPhat", maPhieuPhat);
+
+        Response response = sendRequest("PAY_FINE", payload);
+
+        if (!"SUCCESS".equalsIgnoreCase(response.getStatus())) {
+            throw new Exception(describeFailure(response, "Thu tiền phạt thất bại!"));
+        }
+        return response.getMessage() != null ? response.getMessage() : "Thanh toán phiếu phạt thành công";
+    }
+
+    /**
+     * Gọi action CHECK_CARD_ELIGIBILITY (UC-13): Thủ thư kiểm tra một thẻ độc giả có đủ điều kiện mượn sách không.
+     * Thẻ tồn tại thì Backend luôn trả SUCCESS, kết quả nằm ở trường eligible (kèm reasonCode nếu không đủ);
+     * thẻ không tồn tại thì trả ERROR "Không tìm thấy thẻ độc giả mã: ..." và hàm này ném Exception với thông báo đó.
+     *
+     * Chỉ đọc nên nằm trong SAFE_TO_RETRY.
+     */
+    public CardEligibilityResult checkCardEligibility(int maThe) throws Exception {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("maThe", maThe);
+
+        Response response = sendRequest("CHECK_CARD_ELIGIBILITY", payload);
+
+        if (!"SUCCESS".equalsIgnoreCase(response.getStatus()) || response.getData() == null) {
+            throw new Exception(describeFailure(response, "Không kiểm tra được thẻ độc giả!"));
+        }
+
+        String dataJson = mapper.writeValueAsString(response.getData());
+        CardEligibilityResult result = mapper.readValue(dataJson, CardEligibilityResult.class);
+        result.message = response.getMessage(); // Lý do nằm ở message của Response, không nằm trong data
+        return result;
+    }
+
+    private FineListResult fetchFines() throws Exception {
+        FineListResult merged = new FineListResult();
+
+        for (int page = 1; page <= MAX_BOOK_PAGES; page++) {
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("page", page);
+            payload.put("pageSize", BOOK_PAGE_SIZE);
+
+            Response response = sendRequest("GET_FINES", payload);
+
+            if (!"SUCCESS".equalsIgnoreCase(response.getStatus()) || response.getData() == null) {
+                throw new Exception(describeFailure(response, "Không tải được danh sách phiếu phạt!"));
+            }
+
+            String dataJson = mapper.writeValueAsString(response.getData());
+            FineListResult result = mapper.readValue(dataJson, FineListResult.class);
+
+            merged.tongChuaThanhToan = result.tongChuaThanhToan;
+            merged.totalResults = result.totalResults;
+            if (result.items == null || result.items.isEmpty()) break;
+
+            merged.items.addAll(result.items);
+            if (result.items.size() < BOOK_PAGE_SIZE) break;
+            if (result.totalPages > 0 && page >= result.totalPages) break;
+        }
+        return merged;
     }
 
     /**
@@ -779,6 +909,7 @@ public class SocketClient {
 
             Response res = new Response();
             if (user != null) {
+                mockRole = resolveRole(user);
                 res.setStatus("SUCCESS");
                 res.setMessage("Đăng nhập thành công!");
                 res.setData(user);
@@ -791,6 +922,7 @@ public class SocketClient {
         }
 
         if ("LOGOUT".equals(req.getAction())) {
+            mockRole = null;
             return mapper.writeValueAsString(new Response("SUCCESS", "Đăng xuất thành công", null));
         }
 
@@ -876,6 +1008,113 @@ public class SocketClient {
             data.put("totalPages", 1);
             data.put("items", items);
             return mapper.writeValueAsString(new Response("SUCCESS", "Tải lịch sử mượn trả thành công", data));
+        }
+
+        if ("CHECK_CARD_ELIGIBILITY".equals(req.getAction())) {
+            if (!"LIBRARIAN".equals(mockRole)) {
+                return mapper.writeValueAsString(new Response("FORBIDDEN", "Bạn không có quyền thực hiện chức năng này!", null));
+            }
+            Map<String, Object> params = mapper.readValue(
+                mapper.writeValueAsString(req.getData()),
+                new TypeReference<Map<String, Object>>() {}
+            );
+            Object theObj = params.get("maThe");
+            if (!(theObj instanceof Number)) {
+                return mapper.writeValueAsString(new Response("BAD_REQUEST", "Thiếu hoặc sai tham số: maThe", null));
+            }
+            int maThe = ((Number) theObj).intValue();
+
+            Map<String, Object> reader = null;
+            for (Map<String, Object> r : mockReaders) {
+                if (((Number) r.get("maThe")).intValue() == maThe) { reader = r; break; }
+            }
+            if (reader == null) {
+                return mapper.writeValueAsString(new Response("ERROR", "Không tìm thấy thẻ độc giả mã: " + maThe, null));
+            }
+
+            // Cùng thứ tự kiểm tra với Backend thật: khóa -> hết hạn -> nợ phạt -> (quá hạn) -> hạn mức
+            int dangMuon = ((Number) reader.get("dangMuon")).intValue();
+            int toiDa = ((Number) mockConfig.get("soSachToiDa")).intValue();
+            String status = String.valueOf(reader.get("trangThaiThe"));
+            boolean hasUnpaidFine = false;
+            for (Map<String, Object> f : mockFines) {
+                if (((Number) f.get("maThe")).intValue() == maThe && !Boolean.TRUE.equals(f.get("daThanhToan"))) hasUnpaidFine = true;
+            }
+            String reasonCode = null;
+            String message = "Thẻ đủ điều kiện mượn sách";
+            if ("LOCKED".equals(status)) { reasonCode = "CARD_LOCKED"; message = "Thẻ đang bị khóa"; }
+            else if ("EXPIRED".equals(status)) { reasonCode = "CARD_EXPIRED"; message = "Thẻ hết hạn"; }
+            else if (hasUnpaidFine) { reasonCode = "HAS_UNPAID_FINE"; message = "Đang nợ tiền phạt chưa nộp"; }
+            else if (dangMuon >= toiDa) { reasonCode = "BORROW_LIMIT_REACHED"; message = "Đã mượn đủ số lượng tối đa"; }
+
+            Map<String, Object> docGia = new LinkedHashMap<>();
+            docGia.put("maND", reader.get("maND"));
+            docGia.put("hoTen", reader.get("hoTen"));
+            docGia.put("email", reader.get("email"));
+            docGia.put("soDienThoai", reader.get("soDienThoai"));
+            docGia.put("maThe", maThe);
+            docGia.put("ngayCap", reader.get("ngayCap"));
+            docGia.put("ngayHetHan", reader.get("ngayHetHan"));
+            docGia.put("trangThaiThe", status);
+
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("eligible", reasonCode == null);
+            data.put("reasonCode", reasonCode);
+            data.put("docGia", docGia);
+            data.put("dangMuon", dangMuon);
+            data.put("soSachToiDa", toiDa);
+            data.put("conDuocMuon", Math.max(0, toiDa - dangMuon));
+            return mapper.writeValueAsString(new Response("SUCCESS", message, data));
+        }
+
+        if ("GET_FINES".equals(req.getAction())) {
+            if (mockRole == null) {
+                return mapper.writeValueAsString(new Response("UNAUTHORIZED", "Vui lòng đăng nhập!", null));
+            }
+            // Giống Backend thật: Độc giả chỉ thấy phiếu của thẻ mình, Thủ thư thấy tất cả
+            boolean isReader = "READER".equals(mockRole);
+            List<Map<String, Object>> items = new ArrayList<>();
+            double chuaNop = 0;
+            for (Map<String, Object> f : mockFines) {
+                if (isReader && ((Number) f.get("maThe")).intValue() != MOCK_READER_MA_THE) continue;
+                items.add(f);
+                if (!Boolean.TRUE.equals(f.get("daThanhToan"))) chuaNop += ((Number) f.get("soTienPhat")).doubleValue();
+            }
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("totalResults", items.size());
+            data.put("page", 1);
+            data.put("pageSize", 100);
+            data.put("totalPages", 1);
+            data.put("tongChuaThanhToan", chuaNop);
+            data.put("items", items);
+            return mapper.writeValueAsString(new Response("SUCCESS", "Tải danh sách phiếu phạt thành công", data));
+        }
+
+        if ("PAY_FINE".equals(req.getAction())) {
+            if (!"LIBRARIAN".equals(mockRole)) {
+                return mapper.writeValueAsString(new Response("FORBIDDEN", "Bạn không có quyền thực hiện chức năng này!", null));
+            }
+            Map<String, Object> params = mapper.readValue(
+                mapper.writeValueAsString(req.getData()),
+                new TypeReference<Map<String, Object>>() {}
+            );
+            Object idObj = params.get("maPhieuPhat");
+            if (!(idObj instanceof Number)) {
+                return mapper.writeValueAsString(new Response("BAD_REQUEST", "Thiếu hoặc sai tham số: maPhieuPhat", null));
+            }
+            int id = ((Number) idObj).intValue();
+            for (Map<String, Object> f : mockFines) {
+                if (((Number) f.get("maPhieuPhat")).intValue() != id) continue;
+                if (Boolean.TRUE.equals(f.get("daThanhToan"))) {
+                    return mapper.writeValueAsString(new Response("ERROR", "Phiếu phạt đã được thanh toán trước đó", null));
+                }
+                f.put("daThanhToan", true);
+                Map<String, Object> data = new LinkedHashMap<>();
+                data.put("maPhieuPhat", id);
+                data.put("daThanhToan", true);
+                return mapper.writeValueAsString(new Response("SUCCESS", "Thanh toán phiếu phạt thành công", data));
+            }
+            return mapper.writeValueAsString(new Response("ERROR", "Không tìm thấy phiếu phạt mã: " + id, null));
         }
 
         if ("RENEW_BOOK".equals(req.getAction())) {
