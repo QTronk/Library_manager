@@ -7,6 +7,7 @@ import library.model.Book;
 import library.model.BorrowHistoryResult;
 import library.model.BorrowTicketResult;
 import library.model.ReturnBookResult;
+import library.model.SystemConfig;
 import library.model.UserListResult;
 import library.model.Request;
 import library.model.Response;
@@ -128,7 +129,17 @@ public class SocketClient {
     // (gửi lại action ghi dữ liệu có thể làm nghiệp vụ chạy 2 lần).
     private static final Set<String> SAFE_TO_RETRY =
             Set.of("LOGIN", "SEARCH_BOOKS", "GET_BOOK_DETAIL", "GET_CATEGORIES",
-                   "GET_BORROW_HISTORY", "GET_LIBRARIANS", "GET_READERS");
+                   "GET_BORROW_HISTORY", "GET_LIBRARIANS", "GET_READERS", "GET_SYSTEM_CONFIG");
+
+    // Cấu hình giả lập (chỉ dùng ở chế độ Mock), có lưu lại để thử luồng Sửa -> Xác nhận
+    private final Map<String, Object> mockConfig = new LinkedHashMap<>();
+    {
+        mockConfig.put("soSachToiDa", 5);
+        mockConfig.put("soNgayMuonToiDa", 14);
+        mockConfig.put("tienPhatNgay", 5000.0);
+        mockConfig.put("soLanGiaHanToiDa", 2);
+        mockConfig.put("soNgayGiuSachDatTruoc", 3);
+    }
 
     private SocketClient() {
         this.mapper = new ObjectMapper();
@@ -382,6 +393,39 @@ public class SocketClient {
             throw new Exception(describeFailure(response, "Đặt lại mật khẩu thất bại!"));
         }
         return response.getMessage() != null ? response.getMessage() : "Cập nhật thủ thư thành công!";
+    }
+
+    /** UC-04: lấy cấu hình quy định hiện tại (mọi vai trò đã đăng nhập đều gọi được). */
+    public SystemConfig getSystemConfig() throws Exception {
+        Response response = sendRequest("GET_SYSTEM_CONFIG", null);
+
+        if (!"SUCCESS".equalsIgnoreCase(response.getStatus()) || response.getData() == null) {
+            throw new Exception(describeFailure(response, "Không tải được cấu hình!"));
+        }
+        return mapper.readValue(mapper.writeValueAsString(response.getData()), SystemConfig.class);
+    }
+
+    /**
+     * UC-04: cập nhật cấu hình quy định (chỉ ADMIN). Gửi đủ 5 tham số.
+     * Không nằm trong SAFE_TO_RETRY vì là action ghi dữ liệu.
+     *
+     * @return cấu hình sau khi lưu do Backend trả về (nếu Backend không trả thì trả lại chính config đã gửi)
+     */
+    public SystemConfig updateSystemConfig(SystemConfig config) throws Exception {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("soSachToiDa", config.soSachToiDa);
+        payload.put("soNgayMuonToiDa", config.soNgayMuonToiDa);
+        payload.put("tienPhatNgay", config.tienPhatNgay);
+        payload.put("soLanGiaHanToiDa", config.soLanGiaHanToiDa);
+        payload.put("soNgayGiuSachDatTruoc", config.soNgayGiuSachDatTruoc);
+
+        Response response = sendRequest("UPDATE_SYSTEM_CONFIG", payload);
+
+        if (!"SUCCESS".equalsIgnoreCase(response.getStatus())) {
+            throw new Exception(describeFailure(response, "Cập nhật quy định thất bại!"));
+        }
+        if (response.getData() == null) return config;
+        return mapper.readValue(mapper.writeValueAsString(response.getData()), SystemConfig.class);
     }
 
     /** Đóng kết nối tới Backend (gọi khi thoát ứng dụng nếu cần). */
@@ -862,6 +906,31 @@ public class SocketClient {
                 return mapper.writeValueAsString(new Response("BAD_REQUEST", "Mật khẩu không hợp lệ (tối thiểu 6 ký tự)!", null));
             }
             return mapper.writeValueAsString(new Response("SUCCESS", "Cập nhật thủ thư thành công!", null));
+        }
+
+        if ("GET_SYSTEM_CONFIG".equals(req.getAction())) {
+            return mapper.writeValueAsString(new Response("SUCCESS", "Tải cấu hình thành công",
+                new LinkedHashMap<>(mockConfig)));
+        }
+
+        if ("UPDATE_SYSTEM_CONFIG".equals(req.getAction())) {
+            Map<String, Object> params = mapper.readValue(
+                mapper.writeValueAsString(req.getData()),
+                new TypeReference<Map<String, Object>>() {}
+            );
+            // Cùng luật với Backend thật: cả 5 tham số phải là số lớn hơn 0
+            for (String key : mockConfig.keySet()) {
+                Object v = params.get(key);
+                if (!(v instanceof Number) || ((Number) v).doubleValue() <= 0) {
+                    return mapper.writeValueAsString(new Response("BAD_REQUEST",
+                        "Tham số cấu hình phải là số lớn hơn 0", null));
+                }
+            }
+            for (String key : new ArrayList<>(mockConfig.keySet())) {
+                mockConfig.put(key, params.get(key));
+            }
+            return mapper.writeValueAsString(new Response("SUCCESS", "Cập nhật quy định thành công",
+                new LinkedHashMap<>(mockConfig)));
         }
 
         if ("SEARCH_BOOKS".equals(req.getAction())) {

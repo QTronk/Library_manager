@@ -23,6 +23,7 @@ public class MainFrame extends JFrame {
     private static final String CARD_HISTORY = "HISTORY";
     private static final String CARD_RETURN = "RETURN";
     private static final String CARD_ADMIN_USERS = "ADMIN_USERS";
+    private static final String CARD_CONFIG = "CONFIG";
 
     // Header Components
     private JPanel headerRightPanel;
@@ -55,6 +56,7 @@ public class MainFrame extends JFrame {
 
     private BorrowHistoryPanel historyPanel; // Giữ tham chiếu để xóa dữ liệu khi đăng xuất
     private AdminUsersPanel adminUsersPanel; // Tương tự: danh sách người dùng của Admin
+    private SystemConfigPanel configPanel;   // Tương tự: thoát chế độ sửa và xóa dữ liệu khi đăng xuất
 
     public MainFrame() {
         setTitle("Library Management System");
@@ -171,6 +173,8 @@ public class MainFrame extends JFrame {
         contentPanel.add(new ReturnBookPanel(), CARD_RETURN);
         adminUsersPanel = new AdminUsersPanel();
         contentPanel.add(adminUsersPanel, CARD_ADMIN_USERS);
+        configPanel = new SystemConfigPanel();
+        contentPanel.add(configPanel, CARD_CONFIG);
 
         LoginPanel loginPanel = new LoginPanel(new LoginPanel.LoginListener() {
             @Override
@@ -202,7 +206,7 @@ public class MainFrame extends JFrame {
 
         reportButton.addActionListener(e -> navigateTo(reportButton, CARD_ADMIN_USERS));
         manageAccountButton.addActionListener(e -> navigateTo(manageAccountButton, CARD_HOME));
-        configButton.addActionListener(e -> navigateTo(configButton, CARD_HOME));
+        configButton.addActionListener(e -> navigateTo(configButton, CARD_CONFIG));
 
         loginButton.addActionListener(e -> {
             setActiveButton(null); // Bỏ active ở sidebar khi sang Login
@@ -332,6 +336,7 @@ public class MainFrame extends JFrame {
         currentUser = null;
         historyPanel.clear(); // Không để người đăng nhập sau thấy dữ liệu của người trước
         adminUsersPanel.clear();
+        configPanel.reset();
 
         // Báo Backend xóa phiên đăng nhập của kết nối (chạy nền, không chặn giao diện)
         new SwingWorker<Void, Void>() {
