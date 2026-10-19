@@ -1,6 +1,7 @@
 package library.main;
 
-import com.formdev.flatlaf.FlatLightLaf;
+// import com.formdev.flatlaf.FlatLightLaf;
+import com.formdev.flatlaf.FlatDarkLaf;
 import library.ui.MainFrame;
 
 import javax.swing.*;
@@ -16,7 +17,8 @@ public class Main {
         UIManager.put("TextComponent.focusedBorderColor", emeraldGreen);
         UIManager.put("Component.accentColor", emeraldGreen);
 
-        FlatLightLaf.setup();
+        // FlatLightLaf.setup();
+        FlatDarkLaf.setup();
 
         SwingUtilities.invokeLater(() -> {
             MainFrame mainFrame = new MainFrame();

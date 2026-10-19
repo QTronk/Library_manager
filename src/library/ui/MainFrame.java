@@ -24,6 +24,7 @@ public class MainFrame extends JFrame {
     private static final String CARD_RETURN = "RETURN";
     private static final String CARD_ADMIN_USERS = "ADMIN_USERS";
     private static final String CARD_CONFIG = "CONFIG";
+    private static final String CARD_READERS = "READERS";
 
     // Header Components
     private JPanel headerRightPanel;
@@ -56,6 +57,7 @@ public class MainFrame extends JFrame {
 
     private BorrowHistoryPanel historyPanel; // Giữ tham chiếu để xóa dữ liệu khi đăng xuất
     private AdminUsersPanel adminUsersPanel; // Tương tự: danh sách người dùng của Admin
+    private ReaderManagementPanel readerPanel; // Tương tự: xóa danh sách thẻ vừa tạo khi đăng xuất
     private SystemConfigPanel configPanel;   // Tương tự: thoát chế độ sửa và xóa dữ liệu khi đăng xuất
 
     public MainFrame() {
@@ -175,6 +177,8 @@ public class MainFrame extends JFrame {
         contentPanel.add(adminUsersPanel, CARD_ADMIN_USERS);
         configPanel = new SystemConfigPanel();
         contentPanel.add(configPanel, CARD_CONFIG);
+        readerPanel = new ReaderManagementPanel();
+        contentPanel.add(readerPanel, CARD_READERS);
 
         LoginPanel loginPanel = new LoginPanel(new LoginPanel.LoginListener() {
             @Override
@@ -202,7 +206,7 @@ public class MainFrame extends JFrame {
         approveBorrowButton.addActionListener(e -> navigateTo(approveBorrowButton, CARD_BORROW));
         returnBookButton.addActionListener(e -> navigateTo(returnBookButton, CARD_RETURN));
         manageStockButton.addActionListener(e -> navigateTo(manageStockButton, CARD_HOME));
-        manageReaderButton.addActionListener(e -> navigateTo(manageReaderButton, CARD_HOME));
+        manageReaderButton.addActionListener(e -> navigateTo(manageReaderButton, CARD_READERS));
 
         reportButton.addActionListener(e -> navigateTo(reportButton, CARD_ADMIN_USERS));
         manageAccountButton.addActionListener(e -> navigateTo(manageAccountButton, CARD_HOME));
@@ -337,6 +341,7 @@ public class MainFrame extends JFrame {
         historyPanel.clear(); // Không để người đăng nhập sau thấy dữ liệu của người trước
         adminUsersPanel.clear();
         configPanel.reset();
+        readerPanel.clear();
 
         // Báo Backend xóa phiên đăng nhập của kết nối (chạy nền, không chặn giao diện)
         new SwingWorker<Void, Void>() {

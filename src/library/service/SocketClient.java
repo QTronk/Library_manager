@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import library.model.Book;
+import library.model.AddReaderResult;
 import library.model.BorrowHistoryResult;
 import library.model.BorrowTicketResult;
 import library.model.ReturnBookResult;
@@ -140,6 +141,10 @@ public class SocketClient {
         mockConfig.put("soLanGiaHanToiDa", 2);
         mockConfig.put("soNgayGiuSachDatTruoc", 3);
     }
+
+    // Bộ đếm mã giả lập khi tạo thẻ độc giả ở chế độ Mock
+    private int mockNextUserId = 501;
+    private int mockNextCardId = 486;
 
     private SocketClient() {
         this.mapper = new ObjectMapper();
@@ -426,6 +431,32 @@ public class SocketClient {
         }
         if (response.getData() == null) return config;
         return mapper.readValue(mapper.writeValueAsString(response.getData()), SystemConfig.class);
+    }
+
+    /**
+     * UC-11: Thủ thư cấp tài khoản độc giả kèm thẻ mới (ADD_READER). Backend tạo cả hai trong một giao dịch.
+     *
+     * @param ngayCapIso    yyyy-MM-dd, hoặc null để Backend lấy ngày hôm nay
+     * @param ngayHetHanIso yyyy-MM-dd (bắt buộc, phải sau ngày cấp)
+     *
+     * Không nằm trong SAFE_TO_RETRY: gửi lại sau lỗi kết nối có thể báo trùng email dù thẻ đã được tạo.
+     */
+    public AddReaderResult addReader(String hoTen, String email, String soDienThoai, String matKhau,
+                                     String ngayCapIso, String ngayHetHanIso) throws Exception {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("hoTen", hoTen);
+        payload.put("email", email);
+        payload.put("soDienThoai", soDienThoai);
+        payload.put("matKhau", matKhau);
+        if (ngayCapIso != null) payload.put("ngayCap", ngayCapIso);
+        payload.put("ngayHetHan", ngayHetHanIso);
+
+        Response response = sendRequest("ADD_READER", payload);
+
+        if (!"SUCCESS".equalsIgnoreCase(response.getStatus()) || response.getData() == null) {
+            throw new Exception(describeFailure(response, "Cấp thẻ độc giả thất bại!"));
+        }
+        return mapper.readValue(mapper.writeValueAsString(response.getData()), AddReaderResult.class);
     }
 
     /** Đóng kết nối tới Backend (gọi khi thoát ứng dụng nếu cần). */
@@ -931,6 +962,23 @@ public class SocketClient {
             }
             return mapper.writeValueAsString(new Response("SUCCESS", "Cập nhật quy định thành công",
                 new LinkedHashMap<>(mockConfig)));
+        }
+
+        if ("ADD_READER".equals(req.getAction())) {
+            Map<String, Object> params = mapper.readValue(
+                mapper.writeValueAsString(req.getData()),
+                new TypeReference<Map<String, Object>>() {}
+            );
+            String email = String.valueOf(params.get("email"));
+            // Email của độc giả có sẵn trong dữ liệu mẫu: dùng để thử nhánh báo trùng
+            if ("user16@thuvien.edu.vn".equalsIgnoreCase(email)) {
+                return mapper.writeValueAsString(new Response("ERROR",
+                    "Email hoặc Số điện thoại đã tồn tại trên hệ thống", null));
+            }
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("maND", mockNextUserId++);
+            data.put("maThe", mockNextCardId++);
+            return mapper.writeValueAsString(new Response("SUCCESS", "Cấp thẻ độc giả thành công!", data));
         }
 
         if ("SEARCH_BOOKS".equals(req.getAction())) {
