@@ -21,6 +21,8 @@ public class MainFrame extends JFrame {
     private static final String CARD_LOGIN = "LOGIN";
     private static final String CARD_BORROW = "BORROW";
     private static final String CARD_HISTORY = "HISTORY";
+    private static final String CARD_RETURN = "RETURN";
+    private static final String CARD_ADMIN_USERS = "ADMIN_USERS";
 
     // Header Components
     private JPanel headerRightPanel;
@@ -52,6 +54,7 @@ public class MainFrame extends JFrame {
     private User currentUser = null;
 
     private BorrowHistoryPanel historyPanel; // Giữ tham chiếu để xóa dữ liệu khi đăng xuất
+    private AdminUsersPanel adminUsersPanel; // Tương tự: danh sách người dùng của Admin
 
     public MainFrame() {
         setTitle("Library Management System");
@@ -164,6 +167,9 @@ public class MainFrame extends JFrame {
         contentPanel.add(new BorrowTicketPanel(), CARD_BORROW);
         historyPanel = new BorrowHistoryPanel();
         contentPanel.add(historyPanel, CARD_HISTORY);
+        contentPanel.add(new ReturnBookPanel(), CARD_RETURN);
+        adminUsersPanel = new AdminUsersPanel();
+        contentPanel.add(adminUsersPanel, CARD_ADMIN_USERS);
 
         LoginPanel loginPanel = new LoginPanel(new LoginPanel.LoginListener() {
             @Override
@@ -189,11 +195,11 @@ public class MainFrame extends JFrame {
         
         historyButton.addActionListener(e -> navigateTo(historyButton, CARD_HISTORY));
         approveBorrowButton.addActionListener(e -> navigateTo(approveBorrowButton, CARD_BORROW));
-        returnBookButton.addActionListener(e -> navigateTo(returnBookButton, CARD_HOME));
+        returnBookButton.addActionListener(e -> navigateTo(returnBookButton, CARD_RETURN));
         manageStockButton.addActionListener(e -> navigateTo(manageStockButton, CARD_HOME));
         manageReaderButton.addActionListener(e -> navigateTo(manageReaderButton, CARD_HOME));
 
-        reportButton.addActionListener(e -> navigateTo(reportButton, CARD_HOME));
+        reportButton.addActionListener(e -> navigateTo(reportButton, CARD_ADMIN_USERS));
         manageAccountButton.addActionListener(e -> navigateTo(manageAccountButton, CARD_HOME));
         configButton.addActionListener(e -> navigateTo(configButton, CARD_HOME));
 
@@ -324,6 +330,7 @@ public class MainFrame extends JFrame {
     private void handleLogout() {
         currentUser = null;
         historyPanel.clear(); // Không để người đăng nhập sau thấy dữ liệu của người trước
+        adminUsersPanel.clear();
 
         // Báo Backend xóa phiên đăng nhập của kết nối (chạy nền, không chặn giao diện)
         new SwingWorker<Void, Void>() {

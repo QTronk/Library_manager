@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import library.model.Book;
 import library.model.BorrowHistoryResult;
 import library.model.BorrowTicketResult;
+import library.model.ReturnBookResult;
+import library.model.UserListResult;
 import library.model.Request;
 import library.model.Response;
 import library.model.User;
@@ -125,7 +127,8 @@ public class SocketClient {
     // Chỉ những action chỉ-đọc mới được tự gửi lại khi phát hiện kết nối cũ đã chết
     // (gửi lại action ghi dữ liệu có thể làm nghiệp vụ chạy 2 lần).
     private static final Set<String> SAFE_TO_RETRY =
-            Set.of("LOGIN", "SEARCH_BOOKS", "GET_BOOK_DETAIL", "GET_CATEGORIES");
+            Set.of("LOGIN", "SEARCH_BOOKS", "GET_BOOK_DETAIL", "GET_CATEGORIES",
+                   "GET_BORROW_HISTORY", "GET_LIBRARIANS", "GET_READERS");
 
     private SocketClient() {
         this.mapper = new ObjectMapper();
@@ -266,6 +269,119 @@ public class SocketClient {
             throw new Exception(describeFailure(response, "Đổi mật khẩu thất bại!"));
         }
         return response.getMessage() != null ? response.getMessage() : "Đổi mật khẩu thành công!";
+    }
+
+    /**
+     * UC-02 (bước tra cứu): tìm dòng ĐANG MƯỢN của một cuốn sách theo mã vạch (dành cho Thủ thư).
+     * Một mã vạch chỉ có thể đang được mượn tối đa 1 lần nên lấy phần tử đầu.
+     *
+     * @return dòng đang mượn, hoặc null nếu cuốn sách đó hiện không được ai mượn
+     */
+    public BorrowHistoryResult.Item findBorrowingByBarcode(String maCuonSach) throws Exception {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("tab", "BORROWING");
+        payload.put("maCuonSach", maCuonSach);
+        payload.put("page", 1);
+        payload.put("pageSize", 10);
+
+        Response response = sendRequest("GET_BORROW_HISTORY", payload);
+
+        if (!"SUCCESS".equalsIgnoreCase(response.getStatus())) {
+            throw new Exception(describeFailure(response, "Không tra cứu được sách đang mượn!"));
+        }
+        if (response.getData() == null) return null;
+
+        String dataJson = mapper.writeValueAsString(response.getData());
+        BorrowHistoryResult result = mapper.readValue(dataJson, BorrowHistoryResult.class);
+        return (result.items == null || result.items.isEmpty()) ? null : result.items.get(0);
+    }
+
+    /**
+     * Gọi action PROCESS_RETURN_BOOK (UC-02): trả 1 cuốn sách. Tiền phạt trễ hạn do Backend tự tính.
+     *
+     * @param tinhTrangKhiTra tình trạng vật lý khi thu hồi (Backend cắt tối đa 50 ký tự)
+     * @param viPham          null = không vi phạm; "DAMAGED" = hỏng; "LOST" = mất
+     * @param soTienPhat      tiền phạt hỏng/mất; null = Backend dùng giá bìa
+     * @param ghiChu          ghi chú nối vào lý do phạt (có thể null)
+     *
+     * Không nằm trong SAFE_TO_RETRY: action ghi dữ liệu nên không tự gửi lại khi lỗi kết nối.
+     */
+    public ReturnBookResult processReturn(int maCTPM, String tinhTrangKhiTra, String viPham,
+                                          Double soTienPhat, String ghiChu) throws Exception {
+        Map<String, Object> line = new LinkedHashMap<>();
+        line.put("maCTPM", maCTPM);
+        line.put("tinhTrangKhiTra", tinhTrangKhiTra);
+        if (viPham != null) line.put("viPham", viPham);
+        if (soTienPhat != null) line.put("soTienPhat", soTienPhat);
+        if (ghiChu != null && !ghiChu.trim().isEmpty()) line.put("ghiChu", ghiChu.trim());
+
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("danhSachTra", List.of(line));
+
+        Response response = sendRequest("PROCESS_RETURN_BOOK", payload);
+
+        if (!"SUCCESS".equalsIgnoreCase(response.getStatus()) || response.getData() == null) {
+            throw new Exception(describeFailure(response, "Trả sách thất bại!"));
+        }
+
+        String dataJson = mapper.writeValueAsString(response.getData());
+        return mapper.readValue(dataJson, ReturnBookResult.class);
+    }
+
+    /** UC-15: danh sách Thủ thư (quyền ADMIN). keyword có thể rỗng. */
+    public List<UserListResult.Item> getLibrarians(String keyword) throws Exception {
+        return fetchUsers("GET_LIBRARIANS", keyword);
+    }
+
+    /** UC-11: danh sách Độc giả (theo phân quyền hiện tại của Backend chỉ Thủ thư gọi được). */
+    public List<UserListResult.Item> getReaders(String keyword) throws Exception {
+        return fetchUsers("GET_READERS", keyword);
+    }
+
+    /** Gọi nhiều trang cho đến khi lấy hết danh sách người dùng. */
+    private List<UserListResult.Item> fetchUsers(String action, String keyword) throws Exception {
+        List<UserListResult.Item> all = new ArrayList<>();
+
+        for (int page = 1; page <= MAX_BOOK_PAGES; page++) {
+            Map<String, Object> payload = new HashMap<>();
+            if (keyword != null && !keyword.trim().isEmpty()) {
+                payload.put("keyword", keyword.trim());
+            }
+            payload.put("page", page);
+            payload.put("pageSize", BOOK_PAGE_SIZE);
+
+            Response response = sendRequest(action, payload);
+
+            if (!"SUCCESS".equalsIgnoreCase(response.getStatus()) || response.getData() == null) {
+                throw new Exception(describeFailure(response, "Không tải được danh sách người dùng!"));
+            }
+
+            String dataJson = mapper.writeValueAsString(response.getData());
+            UserListResult result = mapper.readValue(dataJson, UserListResult.class);
+            if (result.items == null) break;
+
+            all.addAll(result.items);
+            if (result.items.size() < BOOK_PAGE_SIZE) break;
+            if (result.totalPages > 0 && page >= result.totalPages) break;
+        }
+        return all;
+    }
+
+    /**
+     * UC-15: Admin đặt lại mật khẩu cho một Thủ thư (UPDATE_LIBRARIAN chỉ gửi maND và matKhau).
+     * Không nằm trong SAFE_TO_RETRY vì là action ghi dữ liệu.
+     */
+    public String resetLibrarianPassword(int maND, String newPassword) throws Exception {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("maND", maND);
+        payload.put("matKhau", newPassword);
+
+        Response response = sendRequest("UPDATE_LIBRARIAN", payload);
+
+        if (!"SUCCESS".equalsIgnoreCase(response.getStatus())) {
+            throw new Exception(describeFailure(response, "Đặt lại mật khẩu thất bại!"));
+        }
+        return response.getMessage() != null ? response.getMessage() : "Cập nhật thủ thư thành công!";
     }
 
     /** Đóng kết nối tới Backend (gọi khi thoát ứng dụng nếu cần). */
@@ -549,7 +665,20 @@ public class SocketClient {
                 {52, 102, "BS-3-01", "Doraemon", 3, 11, 0},
                 {53, 103, "BS-4-02", "C++ Programming", 13, 1, 2},
             };
+            // Thủ thư tra cứu theo mã vạch (maCuonSach) thì chỉ trả đúng cuốn đó
+            String filterCode = null;
+            if (req.getData() != null) {
+                Map<String, Object> prm = mapper.readValue(
+                    mapper.writeValueAsString(req.getData()),
+                    new TypeReference<Map<String, Object>>() {}
+                );
+                Object mc = prm.get("maCuonSach");
+                if (mc != null && !String.valueOf(mc).trim().isEmpty()) {
+                    filterCode = String.valueOf(mc).trim();
+                }
+            }
             for (Object[] x : samples) {
+                if (filterCode != null && !filterCode.equals(String.valueOf(x[2]))) continue;
                 int daysLeft = (Integer) x[5];
                 Map<String, Object> it = new LinkedHashMap<>();
                 it.put("maCTPM", x[0]);
@@ -606,6 +735,133 @@ public class SocketClient {
                 return mapper.writeValueAsString(new Response("ERROR", "Mật khẩu cũ không chính xác!", null));
             }
             return mapper.writeValueAsString(new Response("SUCCESS", "Đổi mật khẩu thành công!", null));
+        }
+
+        if ("PROCESS_RETURN_BOOK".equals(req.getAction())) {
+            Map<String, Object> params = mapper.readValue(
+                mapper.writeValueAsString(req.getData()),
+                new TypeReference<Map<String, Object>>() {}
+            );
+            Object listObj = params.get("danhSachTra");
+            if (!(listObj instanceof List) || ((List<?>) listObj).isEmpty()
+                    || !(((List<?>) listObj).get(0) instanceof Map)) {
+                return mapper.writeValueAsString(new Response("BAD_REQUEST", "Danh sách trả sách trống!", null));
+            }
+            Map<?, ?> line = (Map<?, ?>) ((List<?>) listObj).get(0);
+            int maCTPM = (line.get("maCTPM") instanceof Number) ? ((Number) line.get("maCTPM")).intValue() : 0;
+            String viPham = line.get("viPham") == null ? "" : String.valueOf(line.get("viPham"));
+            String ghiChu = line.get("ghiChu") == null ? "" : String.valueOf(line.get("ghiChu"));
+
+            // Dữ liệu mẫu khớp với danh sách mượn giả lập: CTPM 51 trễ 2 ngày, CTPM 52 đang có người đặt trước
+            String maCuon = maCTPM == 50 ? "BS-1-02" : maCTPM == 51 ? "BS-2-01" : maCTPM == 52 ? "BS-3-01" : "BS-4-02";
+            String tenSach = maCTPM == 50 ? "Clean Code" : maCTPM == 51 ? "Java Core" : maCTPM == 52 ? "Doraemon" : "C++ Programming";
+            int soNgayTre = maCTPM == 51 ? 2 : 0;
+
+            List<Map<String, Object>> fines = new ArrayList<>();
+            double total = 0;
+            if (soNgayTre > 0) {
+                Map<String, Object> f = new LinkedHashMap<>();
+                f.put("maPhieuPhat", 7);
+                f.put("lyDo", "Trễ hạn " + soNgayTre + " ngày");
+                f.put("soTienPhat", soNgayTre * 5000.0);
+                fines.add(f);
+                total += soNgayTre * 5000.0;
+            }
+            boolean lost = "LOST".equals(viPham);
+            boolean damaged = "DAMAGED".equals(viPham);
+            if (lost || damaged) {
+                double tien = (line.get("soTienPhat") instanceof Number)
+                        ? ((Number) line.get("soTienPhat")).doubleValue() : 150000.0;
+                Map<String, Object> f = new LinkedHashMap<>();
+                f.put("maPhieuPhat", 8);
+                f.put("lyDo", (lost ? "Mất sách" : "Hỏng sách") + (ghiChu.isEmpty() ? "" : ": " + ghiChu));
+                f.put("soTienPhat", tien);
+                fines.add(f);
+                total += tien;
+            }
+
+            boolean reserved = !lost && !damaged && maCTPM == 52;
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("maCTPM", maCTPM);
+            item.put("maCuonSach", maCuon);
+            item.put("tenSach", tenSach);
+            item.put("soNgayTre", soNgayTre);
+            item.put("trangThaiCuonSach", lost ? "LOST" : damaged ? "DAMAGED" : reserved ? "RESERVED" : "AVAILABLE");
+            item.put("phieuPhat", fines);
+            item.put("datTruocDuocThongBao", reserved ? 12 : null);
+
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("tongTienPhat", total);
+            data.put("coPhat", total > 0);
+            data.put("ketQua", List.of(item));
+            return mapper.writeValueAsString(new Response("SUCCESS",
+                total > 0 ? "Trả sách thành công. Tổng tiền phạt: " + total + " VNĐ" : "Trả sách thành công!", data));
+        }
+
+        if ("GET_LIBRARIANS".equals(req.getAction()) || "GET_READERS".equals(req.getAction())) {
+            boolean librarians = "GET_LIBRARIANS".equals(req.getAction());
+            String kw = "";
+            if (req.getData() != null) {
+                Map<String, Object> prm = mapper.readValue(
+                    mapper.writeValueAsString(req.getData()),
+                    new TypeReference<Map<String, Object>>() {}
+                );
+                if (prm.get("keyword") != null) kw = String.valueOf(prm.get("keyword")).toLowerCase();
+            }
+
+            List<Map<String, Object>> items = new ArrayList<>();
+            Object[][] users = librarians
+                ? new Object[][]{
+                    {6, "Trần Thị Mai", "user6@thuvien.edu.vn", "0900000006", true},
+                    {7, "Lê Văn Cường", "user7@thuvien.edu.vn", "0900000007", true},
+                    {8, "Phạm Thị Hoa", "user8@thuvien.edu.vn", "0900000008", false},
+                  }
+                : new Object[][]{
+                    {16, "Nguyễn Văn An", "user16@thuvien.edu.vn", "0912345678", true, 1, "ACTIVE", 2},
+                    {17, "Trần Thị Bình", "user17@thuvien.edu.vn", "0912345679", true, 2, "LOCKED", 0},
+                    {18, "Lê Minh Châu", "user18@thuvien.edu.vn", "0912345680", true, 3, "EXPIRED", 1},
+                  };
+            for (Object[] u : users) {
+                String hay = (u[1] + " " + u[2] + " " + u[3]).toLowerCase();
+                if (!kw.isEmpty() && !hay.contains(kw)) continue;
+
+                Map<String, Object> it = new LinkedHashMap<>();
+                it.put("maND", u[0]);
+                it.put("hoTen", u[1]);
+                it.put("email", u[2]);
+                it.put("soDienThoai", u[3]);
+                if (librarians) {
+                    it.put("trangThai", u[4]);
+                } else {
+                    it.put("trangThaiTaiKhoan", u[4]);
+                    it.put("maThe", u[5]);
+                    it.put("ngayCap", "2026-01-01");
+                    it.put("ngayHetHan", "2027-01-01");
+                    it.put("trangThaiThe", u[6]);
+                    it.put("dangMuon", u[7]);
+                }
+                items.add(it);
+            }
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("totalResults", items.size());
+            data.put("page", 1);
+            data.put("pageSize", 100);
+            data.put("totalPages", 1);
+            data.put("items", items);
+            return mapper.writeValueAsString(new Response("SUCCESS",
+                librarians ? "Tải danh sách thủ thư thành công" : "Tải danh sách độc giả thành công", data));
+        }
+
+        if ("UPDATE_LIBRARIAN".equals(req.getAction())) {
+            Map<String, Object> params = mapper.readValue(
+                mapper.writeValueAsString(req.getData()),
+                new TypeReference<Map<String, Object>>() {}
+            );
+            Object pw = params.get("matKhau");
+            if (pw != null && String.valueOf(pw).length() < 6) {
+                return mapper.writeValueAsString(new Response("BAD_REQUEST", "Mật khẩu không hợp lệ (tối thiểu 6 ký tự)!", null));
+            }
+            return mapper.writeValueAsString(new Response("SUCCESS", "Cập nhật thủ thư thành công!", null));
         }
 
         if ("SEARCH_BOOKS".equals(req.getAction())) {
