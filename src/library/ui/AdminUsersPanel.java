@@ -33,6 +33,21 @@ public class AdminUsersPanel extends JPanel {
     private static final String[] READER_COLUMNS = {
             "Mã ND", "Họ tên", "Email", "Số điện thoại", "Mã thẻ", "Hạn thẻ", "Trạng thái thẻ", "Đang mượn"
     };
+    // Mỗi cột: {nhỏ nhất, ưu tiên, lớn nhất}. Cột Email co giãn để nhận phần dư khi phóng to cửa sổ.
+    private static final int[][] LIBRARIAN_WIDTHS = {
+            {70, 80, 100}, {140, 200, 280}, {180, 260, UiTable.FLEX}, {110, 120, 150}, {100, 110, 140}
+    };
+    private static final int[] LIBRARIAN_ALIGNMENT = {
+            SwingConstants.CENTER, SwingConstants.LEFT, SwingConstants.LEFT, SwingConstants.LEFT, SwingConstants.CENTER
+    };
+    private static final int[][] READER_WIDTHS = {
+            {70, 80, 100}, {140, 180, 240}, {180, 230, UiTable.FLEX}, {110, 120, 150},
+            {70, 80, 100}, {95, 100, 120}, {110, 120, 150}, {80, 90, 110}
+    };
+    private static final int[] READER_ALIGNMENT = {
+            SwingConstants.CENTER, SwingConstants.LEFT, SwingConstants.LEFT, SwingConstants.LEFT,
+            SwingConstants.CENTER, SwingConstants.CENTER, SwingConstants.CENTER, SwingConstants.CENTER
+    };
     private static final DateTimeFormatter TIME_VN = DateTimeFormatter.ofPattern("HH:mm:ss");
 
     private final JComboBox<String> roleBox = new JComboBox<>(new String[]{"Thủ thư", "Độc giả"});
@@ -88,9 +103,8 @@ public class AdminUsersPanel extends JPanel {
                 return false;
             }
         };
-        table = new JTable(model);
-        table.setRowHeight(26);
-        table.getTableHeader().setReorderingAllowed(false);
+        table = new UiTable(model); // Cột cố định, dòng cao, tooltip khi chữ bị cắt, cuộn ngang khi cửa sổ hẹp
+        applyColumnStyle(true);
 
         // Bấm vào một dòng -> xem chi tiết (giống màn Tra cứu sách)
         table.addMouseListener(new MouseAdapter() {
@@ -139,6 +153,7 @@ public class AdminUsersPanel extends JPanel {
         displayedLibrarian = librarian;
         items.clear();
         model.setColumnIdentifiers(librarian ? LIBRARIAN_COLUMNS : READER_COLUMNS);
+        applyColumnStyle(librarian); // Đổi cột thì JTable dựng lại cột nên phải đặt lại độ rộng và căn lề
         model.setRowCount(0);
         statusLabel.setText("Đang tải dữ liệu từ máy chủ...");
 
@@ -173,6 +188,11 @@ public class AdminUsersPanel extends JPanel {
             }
         };
         worker.execute();
+    }
+
+    private void applyColumnStyle(boolean librarian) {
+        UiTable.setColumnWidths(table, librarian ? LIBRARIAN_WIDTHS : READER_WIDTHS);
+        UiTable.setColumnAlignments(table, librarian ? LIBRARIAN_ALIGNMENT : READER_ALIGNMENT);
     }
 
     private void fillTable(boolean librarian) {

@@ -27,7 +27,7 @@ public class ChangePasswordDialog extends JDialog {
     private final JPasswordField confirmField = new JPasswordField(20);
     private final JCheckBox showCheck = new JCheckBox("Hiện mật khẩu");
     private final JLabel errorLabel = new JLabel(" ");
-    private final JButton submitButton = new JButton("Đổi mật khẩu");
+    private final JButton submitButton = new JButton("Hoàn thành");
     private final JButton cancelButton = new JButton("Hủy");
     private final char defaultEchoChar;
 
@@ -73,9 +73,15 @@ public class ChangePasswordDialog extends JDialog {
             confirmField.setEchoChar(echo);
         });
         submitButton.addActionListener(e -> submit());
+
+        // Enter chuyển ô tuần tự: mật khẩu cũ -> mật khẩu mới -> xác nhận -> nút Hoàn thành.
+        // (Ô có ActionListener sẽ giữ lại phím Enter nên không kích hoạt nút mặc định giữa chừng.)
+        oldField.addActionListener(e -> newField.requestFocusInWindow());
+        newField.addActionListener(e -> confirmField.requestFocusInWindow());
+        confirmField.addActionListener(e -> submitButton.requestFocusInWindow());
         cancelButton.addActionListener(e -> closeIfIdle());
 
-        getRootPane().setDefaultButton(submitButton); // Enter = Đổi mật khẩu
+        getRootPane().setDefaultButton(submitButton); // Nút mặc định (viền nổi bật): Enter khi đang ở nút = Hoàn thành
         getRootPane().registerKeyboardAction(e -> closeIfIdle(),
                 KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), JComponent.WHEN_IN_FOCUSED_WINDOW);
 
@@ -122,6 +128,17 @@ public class ChangePasswordDialog extends JDialog {
         return null;
     }
 
+    /** Đưa con trỏ về ô đang bị lỗi để người dùng sửa ngay. */
+    private void focusFieldFor(String oldPw, String newPw, String confirmPw) {
+        if (oldPw.trim().isEmpty()) {
+            oldField.requestFocusInWindow();
+        } else if (newPw.trim().isEmpty() || newPw.length() < MIN_PASSWORD_LENGTH) {
+            newField.requestFocusInWindow();
+        } else {
+            confirmField.requestFocusInWindow();
+        }
+    }
+
     private void setSubmitting(boolean value) {
         submitting = value;
         oldField.setEditable(!value);
@@ -130,7 +147,7 @@ public class ChangePasswordDialog extends JDialog {
         showCheck.setEnabled(!value);
         cancelButton.setEnabled(!value);
         submitButton.setEnabled(!value);
-        submitButton.setText(value ? "Đang xử lý..." : "Đổi mật khẩu");
+        submitButton.setText(value ? "Đang xử lý..." : "Hoàn thành");
     }
 
     private void submit() {
@@ -143,6 +160,7 @@ public class ChangePasswordDialog extends JDialog {
         String problem = validateInput(oldPw, newPw, confirmPw);
         if (problem != null) {
             showError(problem);
+            focusFieldFor(oldPw, newPw, confirmPw);
             return;
         }
 

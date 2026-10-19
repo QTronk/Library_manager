@@ -31,6 +31,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.Locale;
 import java.util.concurrent.ExecutionException;
 
@@ -58,6 +59,24 @@ public class BorrowHistoryPanel extends JPanel {
     private static final int COL_TIEN_PHAT = 7;
     private static final int COL_ACTION = 8; // Cột chứa nút Gia hạn (không dùng để sắp xếp)
 
+    // Mỗi cột: {nhỏ nhất, ưu tiên, lớn nhất}. Cột "Tên sách" co giãn để nhận phần dư khi phóng to cửa sổ.
+    private static final int[][] COLUMN_WIDTHS = {
+            {70, 70, 90},                  // Mã phiếu
+            {140, 200, UiTable.FLEX},      // Tên sách
+            {100, 105, 150},               // Mã cuốn sách
+            {95, 95, 120},                 // Ngày mượn
+            {95, 95, 120},                 // Hạn trả
+            {90, 90, 110},                 // Lần gia hạn
+            {130, 135, 190},               // Tình trạng
+            {125, 130, 170},               // Tiền phạt dự kiến
+            {90, 95, 120}                  // Thao tác
+    };
+    private static final int[] ALIGNMENT = {
+            SwingConstants.CENTER, SwingConstants.LEFT, SwingConstants.LEFT,
+            SwingConstants.CENTER, SwingConstants.CENTER, SwingConstants.CENTER,
+            SwingConstants.LEFT, SwingConstants.RIGHT, SwingConstants.CENTER
+    };
+
     private static final DateTimeFormatter DATE_VN = DateTimeFormatter.ofPattern("dd/MM/yyyy");
     private static final DateTimeFormatter TIME_VN = DateTimeFormatter.ofPattern("HH:mm:ss");
     private static final Color OVERDUE_COLOR = new Color(239, 68, 68);
@@ -71,9 +90,7 @@ public class BorrowHistoryPanel extends JPanel {
     private boolean loading = false;   // Đang tải danh sách
     private boolean renewing = false;  // Đang gửi yêu cầu gia hạn
 
-    // Trạng thái sắp xếp hiện tại: mặc định Hạn trả, tăng dần (gần nhất trước)
-    private int sortColumn = COL_HAN_TRA;
-    private boolean ascending = true;
+    private HeaderSorter sorter; // Sắp xếp khi bấm tiêu đề cột (mặc định: Hạn trả, tăng dần = gần nhất trước)
 
     private final NumberFormat priceFormat = NumberFormat.getNumberInstance(Locale.forLanguageTag("vi-VN"));
     private final Collator collator = Collator.getInstance(Locale.forLanguageTag("vi-VN")); // Sắp chữ theo tiếng Việt
@@ -102,12 +119,10 @@ public class BorrowHistoryPanel extends JPanel {
                 return false;
             }
         };
-        table = new JTable(model);
-        table.setRowHeight(26);
-        table.setAutoCreateRowSorter(false); // Tự sắp xếp theo luật riêng bên dưới
+        table = new UiTable(model); // Cột cố định, dòng cao, tooltip khi chữ bị cắt, cuộn ngang khi cửa sổ hẹp
 
         // Sách quá hạn hiển thị chữ đỏ (dòng đang được chọn giữ màu mặc định của giao diện)
-        table.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
+        table.setDefaultRenderer(Object.class, new UiTable.CellRenderer(ALIGNMENT) {
             @Override
             public Component getTableCellRendererComponent(JTable t, Object value, boolean isSelected,
                                                            boolean hasFocus, int row, int column) {
@@ -122,7 +137,6 @@ public class BorrowHistoryPanel extends JPanel {
 
         // Cột "Thao tác": vẽ nút Gia hạn trên từng dòng (khóa nếu Backend báo không gia hạn được)
         table.getColumnModel().getColumn(COL_ACTION).setCellRenderer(new RenewButtonRenderer());
-        table.getColumnModel().getColumn(COL_ACTION).setPreferredWidth(90);
         table.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
@@ -142,20 +156,9 @@ public class BorrowHistoryPanel extends JPanel {
             }
         });
 
-        // Bấm vào tiêu đề cột để sắp xếp
-        final JTableHeader header = table.getTableHeader();
-        header.setReorderingAllowed(false); // Không cho kéo đổi chỗ cột (để chỉ số cột luôn cố định)
-        header.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        header.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseClicked(MouseEvent e) {
-                if (!SwingUtilities.isLeftMouseButton(e) || header.getResizingColumn() != null) return;
-                int viewColumn = header.columnAtPoint(e.getPoint());
-                if (viewColumn < 0) return;
-                onHeaderClicked(table.convertColumnIndexToModel(viewColumn));
-            }
-        });
-        updateHeaderLabels();
+        // Chiều rộng cột + bấm vào tiêu đề cột để sắp xếp (cột Thao tác không sắp xếp)
+        UiTable.setColumnWidths(table, COLUMN_WIDTHS);
+        sorter = new HeaderSorter(table, COLUMN_NAMES, COL_HAN_TRA, Set.of(COL_ACTION), this::applySort);
 
         add(new JScrollPane(table), BorderLayout.CENTER);
 
@@ -255,36 +258,10 @@ public class BorrowHistoryPanel extends JPanel {
     // ==========================================================
     // SẮP XẾP (làm ở Client)
     // ==========================================================
-    private void onHeaderClicked(int column) {
-        if (column == COL_ACTION) return; // Cột nút bấm, không sắp xếp
-        if (column == sortColumn) {
-            ascending = !ascending;   // Bấm lại cùng cột -> đảo chiều
-        } else {
-            sortColumn = column;      // Cột mới -> bắt đầu từ tăng dần
-            ascending = true;
-        }
-        applySort();
-    }
-
+    /** Sắp xếp lại danh sách theo cột và chiều mà HeaderSorter đang giữ, rồi vẽ lại bảng. */
     private void applySort() {
-        rows.sort(buildComparator(sortColumn, ascending));
+        rows.sort(buildComparator(sorter.getColumn(), sorter.isAscending()));
         fillTable();
-        updateHeaderLabels();
-    }
-
-    /** Gắn mũi tên vào tiêu đề cột đang sắp xếp: ▼ = tăng dần, ▲ = giảm dần. */
-    private void updateHeaderLabels() {
-        TableColumnModel columnModel = table.getColumnModel();
-        for (int i = 0; i < columnModel.getColumnCount(); i++) {
-            TableColumn column = columnModel.getColumn(i);
-            int modelIndex = column.getModelIndex();
-            String text = COLUMN_NAMES[modelIndex];
-            if (modelIndex == sortColumn) {
-                text += ascending ? "  \u25BC" : "  \u25B2";
-            }
-            column.setHeaderValue(text);
-        }
-        table.getTableHeader().repaint();
     }
 
     private Comparator<Row> buildComparator(int column, boolean asc) {

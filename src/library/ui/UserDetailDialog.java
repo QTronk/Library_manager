@@ -47,12 +47,6 @@ public class UserDetailDialog extends JDialog {
             addRow("Đang mượn:", (item.dangMuon == null ? 0 : item.dangMuon) + " cuốn");
         }
 
-        // Mật khẩu: không hiển thị được
-        JLabel passwordNote = new JLabel("Không thể xem (hệ thống chỉ lưu dạng mã hóa một chiều)");
-        passwordNote.setFont(passwordNote.getFont().deriveFont(Font.ITALIC));
-        passwordNote.setForeground(UIManager.getColor("Label.disabledForeground"));
-        addRow("Mật khẩu:", passwordNote);
-
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         if (librarian) {
             JButton resetButton = new JButton("Đặt lại mật khẩu...");

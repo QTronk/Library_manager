@@ -9,25 +9,54 @@ import java.awt.*;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
 import java.io.IOException;
+import java.text.Collator;
 import java.text.NumberFormat;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 
 public class SearchBookPanel extends JPanel {
+
+    private static final String[] COLUMN_NAMES = {
+            "Mã đầu sách", "Tên sách", "Tác giả", "Thể loại", "Nhà xuất bản", "Giá tiền"
+    };
+    private static final int COL_MA = 0;
+    private static final int COL_TEN = 1;
+    private static final int COL_TAC_GIA = 2;
+    private static final int COL_THE_LOAI = 3;
+    private static final int COL_NXB = 4;
+    private static final int COL_GIA = 5;
+
+    // Mỗi cột: {nhỏ nhất, ưu tiên, lớn nhất}. Cột "Tên sách" co giãn để nhận phần dư khi phóng to cửa sổ.
+    private static final int[][] COLUMN_WIDTHS = {
+            {90, 100, 120},
+            {160, 240, UiTable.FLEX},
+            {120, 170, 260},
+            {130, 180, 260},
+            {150, 200, 300},
+            {90, 110, 150}
+    };
+    private static final int[] ALIGNMENT = {
+            SwingConstants.CENTER, SwingConstants.LEFT, SwingConstants.LEFT,
+            SwingConstants.LEFT, SwingConstants.LEFT, SwingConstants.RIGHT
+    };
 
     private JTextField searchField;
     private JButton searchButton;
     private JLabel statusLabel;
     private JTable table;
     private DefaultTableModel model;
+    private HeaderSorter sorter; // Sắp xếp khi bấm tiêu đề cột (mặc định: Mã đầu sách, tăng dần)
 
     private List<Book> books = new ArrayList<>(); // Danh sách đang hiển thị trên bảng
     private boolean loading = false;              // Đang chờ Backend trả lời?
     private boolean loadedOnce = false;           // Đã tải dữ liệu thành công ít nhất 1 lần chưa?
 
     private final NumberFormat priceFormat = NumberFormat.getNumberInstance(Locale.forLanguageTag("vi-VN"));
+    private final Collator collator = Collator.getInstance(Locale.forLanguageTag("vi-VN")); // Sắp chữ theo tiếng Việt
 
     public SearchBookPanel() {
         setLayout(new BorderLayout(10, 10));
@@ -51,23 +80,17 @@ public class SearchBookPanel extends JPanel {
 
         add(top, BorderLayout.NORTH);
 
-        String[] columns = {
-                "Mã đầu sách",
-                "Tên sách",
-                "Tác giả",
-                "Thể loại",
-                "Nhà xuất bản",
-                "Giá tiền"
-        };
-
         // Không cho sửa trực tiếp ô trong bảng (double-click)
-        model = new DefaultTableModel(columns, 0) {
+        model = new DefaultTableModel(COLUMN_NAMES, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
                 return false;
             }
         };
-        table = new JTable(model);
+        table = new UiTable(model); // Cột cố định (không kéo đổi chỗ được), dòng cao, tooltip khi chữ bị cắt
+        UiTable.setColumnWidths(table, COLUMN_WIDTHS);
+        UiTable.setColumnAlignments(table, ALIGNMENT);
+        sorter = new HeaderSorter(table, COLUMN_NAMES, COL_MA, Set.of(), this::applySort);
         add(new JScrollPane(table), BorderLayout.CENTER);
 
         statusLabel = new JLabel(" ");
@@ -122,12 +145,12 @@ public class SearchBookPanel extends JPanel {
             @Override
             protected void done() {
                 try {
-                    books = get();
-                    fillTable(books);
+                    books = new ArrayList<>(get());
+                    applySort(); // Sắp xếp theo cột đang chọn rồi đổ lên bảng
                     loadedOnce = true;
 
                     if (keyword.isEmpty()) {
-                        statusLabel.setText("Có " + books.size() + " đầu sách");
+                        statusLabel.setText("Có " + books.size() + " đầu sách. Bấm vào một dòng để xem chi tiết.");
                     } else {
                         statusLabel.setText("Kết quả cho \"" + keyword + "\": " + books.size() + " đầu sách");
                     }
@@ -165,6 +188,48 @@ public class SearchBookPanel extends JPanel {
         if (value) {
             statusLabel.setText("Đang tải dữ liệu từ máy chủ...");
         }
+    }
+
+    // ==========================================================
+    // SẮP XẾP (làm ở Client, không gọi lại Backend)
+    // ==========================================================
+    private void applySort() {
+        books.sort(buildComparator(sorter.getColumn(), sorter.isAscending()));
+        fillTable(books);
+    }
+
+    private Comparator<Book> buildComparator(int column, boolean asc) {
+        Comparator<Book> primary;
+        switch (column) {
+            case COL_TEN:
+                primary = (a, b) -> collator.compare(nz(a.getTenSach()), nz(b.getTenSach()));
+                break;
+            case COL_TAC_GIA:
+                primary = (a, b) -> collator.compare(nz(a.getTacGia()), nz(b.getTacGia()));
+                break;
+            case COL_THE_LOAI:
+                primary = (a, b) -> collator.compare(nz(a.getTheLoai()), nz(b.getTheLoai()));
+                break;
+            case COL_NXB:
+                primary = (a, b) -> collator.compare(nz(a.getNhaXuatBan()), nz(b.getNhaXuatBan()));
+                break;
+            case COL_GIA:
+                primary = (a, b) -> Double.compare(a.getGiaTien(), b.getGiaTien());
+                break;
+            case COL_MA:
+            default:
+                primary = (a, b) -> Integer.compare(a.getMaDauSach(), b.getMaDauSach());
+                break;
+        }
+
+        final Comparator<Book> directed = asc ? primary : primary.reversed();
+        // Bằng nhau thì xếp theo mã đầu sách để thứ tự luôn ổn định
+        final Comparator<Book> tieBreak = (a, b) -> Integer.compare(a.getMaDauSach(), b.getMaDauSach());
+        return directed.thenComparing(tieBreak);
+    }
+
+    private static String nz(String s) {
+        return s == null ? "" : s;
     }
 
     private void fillTable(List<Book> list) {
