@@ -4,6 +4,9 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import library.model.Book;
+import library.model.AddBookResult;
+import library.model.BookDetail;
+import library.model.Categories;
 import library.model.AddReaderResult;
 import library.model.BorrowHistoryResult;
 import library.model.BorrowTicketResult;
@@ -870,6 +873,100 @@ public class SocketClient {
             throw new Exception(describeFailure(response, "Hủy đặt trước thất bại!"));
         }
         return response.getMessage() != null ? response.getMessage() : "Hủy đặt trước thành công";
+    }
+
+    /** UC-03, UC-12: toàn bộ Tác giả, NXB, Thể loại để đổ vào ô chọn (GET_CATEGORIES, không cần đăng nhập). Chỉ đọc. */
+    public Categories getCategories() throws Exception {
+        Response response = sendRequest("GET_CATEGORIES", null);
+
+        if (!"SUCCESS".equalsIgnoreCase(response.getStatus()) || response.getData() == null) {
+            throw new Exception(describeFailure(response, "Không tải được danh mục!"));
+        }
+        return mapper.readValue(mapper.writeValueAsString(response.getData()), Categories.class);
+    }
+
+    /** UC-03, UC-12: chi tiết một đầu sách (GET_BOOK_DETAIL). Chỉ đọc. */
+    public BookDetail getBookDetail(int maDauSach) throws Exception {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("maDauSach", maDauSach);
+
+        Response response = sendRequest("GET_BOOK_DETAIL", payload);
+
+        if (!"SUCCESS".equalsIgnoreCase(response.getStatus()) || response.getData() == null) {
+            throw new Exception(describeFailure(response, "Không tải được chi tiết đầu sách!"));
+        }
+        return mapper.readValue(mapper.writeValueAsString(response.getData()), BookDetail.class);
+    }
+
+    /**
+     * UC-12: Thủ thư thêm đầu sách mới (ADD_BOOK_TITLE). Backend đặt số lượng = 0 (cuốn vật lý nhập riêng bằng ADD_BOOK_COPIES).
+     * Lưu ý: API.md ghi các khóa ngoại tùy chọn nhưng Backend bắt buộc cả maTG, maNXB, maTL (cột CSDL NOT NULL).
+     *
+     * @param viTri vị trí kệ, null = không gửi
+     * @return mã đầu sách vừa tạo
+     *
+     * Không nằm trong SAFE_TO_RETRY: action ghi dữ liệu nên không tự gửi lại khi lỗi kết nối.
+     */
+    public int addBookTitle(String tenSach, double giaTien, int maTG, int maNXB, int maTL, String viTri) throws Exception {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("tenSach", tenSach);
+        payload.put("giaTien", giaTien);
+        payload.put("maTG", maTG);
+        payload.put("maNXB", maNXB);
+        payload.put("maTL", maTL);
+        if (viTri != null) payload.put("viTri", viTri);
+
+        Response response = sendRequest("ADD_BOOK_TITLE", payload);
+
+        if (!"SUCCESS".equalsIgnoreCase(response.getStatus()) || response.getData() == null) {
+            throw new Exception(describeFailure(response, "Thêm đầu sách thất bại!"));
+        }
+        return mapper.readValue(mapper.writeValueAsString(response.getData()), AddBookResult.class).maDauSach;
+    }
+
+    /**
+     * UC-12: sửa đầu sách (UPDATE_BOOK_TITLE). Tham số nào null thì không gửi (Backend giữ nguyên).
+     * viTri là chuỗi rỗng "" thì xóa trắng vị trí.
+     *
+     * @return thông báo của Backend
+     *
+     * Không nằm trong SAFE_TO_RETRY vì là action ghi dữ liệu.
+     */
+    public String updateBookTitle(int maDauSach, String tenSach, Double giaTien,
+                                  Integer maTG, Integer maNXB, Integer maTL, String viTri) throws Exception {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("maDauSach", maDauSach);
+        if (tenSach != null) payload.put("tenSach", tenSach);
+        if (giaTien != null) payload.put("giaTien", giaTien);
+        if (maTG != null) payload.put("maTG", maTG);
+        if (maNXB != null) payload.put("maNXB", maNXB);
+        if (maTL != null) payload.put("maTL", maTL);
+        if (viTri != null) payload.put("viTri", viTri);
+
+        Response response = sendRequest("UPDATE_BOOK_TITLE", payload);
+
+        if (!"SUCCESS".equalsIgnoreCase(response.getStatus())) {
+            throw new Exception(describeFailure(response, "Cập nhật đầu sách thất bại!"));
+        }
+        return response.getMessage() != null ? response.getMessage() : "Cập nhật đầu sách thành công!";
+    }
+
+    /**
+     * UC-12: xóa đầu sách (DELETE_BOOK_TITLE). Backend chỉ cho xóa khi chưa từng có giao dịch mượn / đặt trước;
+     * các cuốn sách của đầu sách đó bị xóa kèm. Khi không xóa được, Exception mang đúng lý do của Backend.
+     *
+     * Không nằm trong SAFE_TO_RETRY: action ghi dữ liệu nên không tự gửi lại khi lỗi kết nối.
+     */
+    public String deleteBookTitle(int maDauSach) throws Exception {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("maDauSach", maDauSach);
+
+        Response response = sendRequest("DELETE_BOOK_TITLE", payload);
+
+        if (!"SUCCESS".equalsIgnoreCase(response.getStatus())) {
+            throw new Exception(describeFailure(response, "Xóa đầu sách thất bại!"));
+        }
+        return response.getMessage() != null ? response.getMessage() : "Xóa đầu sách thành công!";
     }
 
     /** Đóng kết nối tới Backend (gọi khi thoát ứng dụng nếu cần). */

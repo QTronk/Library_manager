@@ -3,12 +3,15 @@ package library.ui;
 import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLightLaf;
 import com.formdev.flatlaf.FlatLaf;
+import library.model.Reservation;
 import library.model.User;
 import library.service.SocketClient;
 
 import javax.swing.*;
 import java.awt.*;
 import java.net.URL;
+import java.util.ArrayList;
+import java.util.List;
 
 public class MainFrame extends JFrame {
 
@@ -30,6 +33,7 @@ public class MainFrame extends JFrame {
     private static final String CARD_ADMIN_USERS = "ADMIN_USERS";
     private static final String CARD_CONFIG = "CONFIG";
     private static final String CARD_READERS = "READERS";
+    private static final String CARD_BOOKS = "BOOKS";
 
     // Header Components
     private JPanel headerRightPanel;
@@ -69,10 +73,20 @@ public class MainFrame extends JFrame {
     private CardCheckPanel cardCheckPanel;   // Tương tự: kết quả kiểm tra thẻ của Thủ thư
     private FinePanel finePanel;             // Tương tự: phiếu phạt của Độc giả
     private ReservationPanel reservationPanel; // Tương tự: các lượt đặt trước của Độc giả
+
+    // Thông báo sách đặt trước của Độc giả (UC-10): hỏi Backend định kỳ, hiện dấu trên tên người dùng và hộp thoại báo
+    private final ReservationNotifier notifier = new ReservationNotifier();
+    private final List<Reservation> pendingPopups = new ArrayList<>(); // Thông báo mới chờ hiện hộp thoại
+    private JButton userMenuButton;     // Nút tên người dùng ở góc phải (null khi chưa đăng nhập)
+    private JMenuItem notifyMenuItem;   // Mục "Thông báo" trong menu người dùng
+    private String userDisplayName;
+    private boolean popupShowing = false;            // Đang hiện hộp thoại báo thông báo mới
+    private boolean notificationDialogOpen = false;  // Đang mở hộp thoại Thông báo
     private ReservationManagementPanel reservationManagementPanel; // Tương tự: lượt đặt trước của mọi độc giả (Thủ thư)
     private FineManagementPanel fineManagementPanel; // Tương tự: toàn bộ phiếu phạt của Thủ thư
     private AdminUsersPanel adminUsersPanel; // Tương tự: danh sách người dùng của Admin
     private ReaderManagementPanel readerPanel; // Tương tự: xóa danh sách thẻ vừa tạo khi đăng xuất
+    private BookManagementPanel bookManagementPanel; // Tương tự: danh sách đầu sách của Thủ thư
     private SystemConfigPanel configPanel;   // Tương tự: thoát chế độ sửa và xóa dữ liệu khi đăng xuất
 
     public MainFrame() {
@@ -210,6 +224,10 @@ public class MainFrame extends JFrame {
         contentPanel.add(configPanel, CARD_CONFIG);
         readerPanel = new ReaderManagementPanel();
         contentPanel.add(readerPanel, CARD_READERS);
+        bookManagementPanel = new BookManagementPanel();
+        contentPanel.add(bookManagementPanel, CARD_BOOKS);
+
+        setupNotifier();
 
         LoginPanel loginPanel = new LoginPanel(new LoginPanel.LoginListener() {
             @Override
@@ -218,6 +236,9 @@ public class MainFrame extends JFrame {
                 renderUserHeader(user);
                 updateSidebarByRole(user.getRole());
                 navigateTo(homeButton, CARD_HOME);
+                if ("READER".equals(user.getRole())) {
+                    notifier.start(); // UC-10: tải thông báo ngay rồi hỏi lại định kỳ
+                }
             }
 
             @Override
@@ -241,7 +262,7 @@ public class MainFrame extends JFrame {
         returnBookButton.addActionListener(e -> navigateTo(returnBookButton, CARD_RETURN));
         manageFineButton.addActionListener(e -> navigateTo(manageFineButton, CARD_FINE_MANAGE));
         manageReserveButton.addActionListener(e -> navigateTo(manageReserveButton, CARD_RESERVE_MANAGE));
-        manageStockButton.addActionListener(e -> navigateTo(manageStockButton, CARD_HOME));
+        manageStockButton.addActionListener(e -> navigateTo(manageStockButton, CARD_BOOKS));
         manageReaderButton.addActionListener(e -> navigateTo(manageReaderButton, CARD_READERS));
 
         // Thống kê & Báo cáo (UC-16) chưa làm: tạm trỏ về Trang chủ
@@ -337,7 +358,8 @@ public class MainFrame extends JFrame {
 
         headerRightPanel.add(themeToggleButton);
 
-        JButton userMenuButton = new JButton(user.getFullName() + " ▼");
+        userDisplayName = user.getFullName();
+        userMenuButton = new JButton();
         userMenuButton.setFocusPainted(false);
 
         JPopupMenu popupMenu = new JPopupMenu();
@@ -346,9 +368,13 @@ public class MainFrame extends JFrame {
         itemAccount.addActionListener(e -> new ChangePasswordDialog(this).setVisible(true));
         popupMenu.add(itemAccount);
 
-        JMenuItem itemNotify = new JMenuItem("Thông báo");
-        itemNotify.addActionListener(e -> JOptionPane.showMessageDialog(this, "Chức năng: Xem thông báo cá nhân"));
-        popupMenu.add(itemNotify);
+        notifyMenuItem = new JMenuItem("Thông báo");
+        if ("READER".equals(user.getRole())) {
+            notifyMenuItem.addActionListener(e -> openNotificationDialog());
+        } else {
+            notifyMenuItem.addActionListener(e -> JOptionPane.showMessageDialog(this, "Chức năng: Xem thông báo cá nhân"));
+        }
+        popupMenu.add(notifyMenuItem);
 
         popupMenu.addSeparator();
 
@@ -359,9 +385,89 @@ public class MainFrame extends JFrame {
 
         userMenuButton.addActionListener(e -> popupMenu.show(userMenuButton, 0, userMenuButton.getHeight()));
 
+        updateNotificationBadge();
+
         headerRightPanel.add(userMenuButton);
         headerRightPanel.revalidate();
         headerRightPanel.repaint();
+    }
+
+    // ==========================================
+    // THÔNG BÁO SÁCH ĐẶT TRƯỚC (UC-10, Độc giả)
+    // ==========================================
+    private void setupNotifier() {
+        notifier.addListener(new ReservationNotifier.Listener() {
+            @Override
+            public void onChanged(List<Reservation> notified, List<Reservation> newlyNotified) {
+                if (currentUser == null) return;
+                updateNotificationBadge();
+                if (!newlyNotified.isEmpty()) {
+                    pendingPopups.addAll(newlyNotified);
+                    showPendingPopups();
+                }
+            }
+        });
+    }
+
+    /** Hiện số thông báo trên tên người dùng và trên mục "Thông báo" (không có thông báo thì hiện như thường). */
+    private void updateNotificationBadge() {
+        if (userMenuButton == null) return;
+
+        int count = notifier.getNotified().size();
+        String name = userDisplayName == null ? "" : userDisplayName;
+        userMenuButton.setText(count > 0
+                ? "<html>" + UiUtil.html(name) + " <font color='#ef4444'>●" + count + "</font> ▼</html>"
+                : name + " ▼");
+        userMenuButton.setToolTipText(count > 0 ? "Bạn có " + count + " thông báo" : null);
+        if (notifyMenuItem != null) {
+            notifyMenuItem.setText(count > 0 ? "Thông báo (" + count + ")" : "Thông báo");
+        }
+    }
+
+    /** Hộp thoại báo ngay khi có thông báo MỚI (mỗi thông báo chỉ báo một lần trong phiên đăng nhập). */
+    private void showPendingPopups() {
+        if (popupShowing || notificationDialogOpen || pendingPopups.isEmpty()) return;
+        popupShowing = true;
+
+        List<Reservation> batch = new ArrayList<>(pendingPopups);
+        pendingPopups.clear();
+
+        StringBuilder sb = new StringBuilder("<html><div style='width:380px'>");
+        for (int i = 0; i < batch.size(); i++) {
+            Reservation r = batch.get(i);
+            if (i > 0) sb.append("<br><br>");
+            sb.append(UiUtil.html(r.thongBao != null ? r.thongBao
+                    : "Sách [" + (r.tenSach == null ? "" : r.tenSach) + "] bạn đặt trước đã có tại quầy."));
+            if (r.hanNhanSach != null) {
+                sb.append("<br>Hạn nhận: <b>").append(UiUtil.formatDate(r.hanNhanSach)).append("</b>");
+            }
+        }
+        sb.append("</div></html>");
+
+        int choice = JOptionPane.showOptionDialog(this, sb.toString(), "Sách đặt trước đã sẵn sàng",
+                JOptionPane.YES_NO_OPTION, JOptionPane.INFORMATION_MESSAGE,
+                null, new Object[]{"Xem đặt trước", "Đóng"}, "Xem đặt trước");
+
+        popupShowing = false;
+        if (currentUser != null && choice == 0) { // 0 = nút "Xem đặt trước"
+            navigateTo(reserveButton, CARD_RESERVATIONS);
+        }
+        showPendingPopups(); // Nếu trong lúc đang hiện lại có thông báo mới tới
+    }
+
+    private void openNotificationDialog() {
+        if (currentUser == null || notificationDialogOpen) return;
+        notificationDialogOpen = true;
+
+        NotificationDialog dialog = new NotificationDialog(this, notifier);
+        dialog.setVisible(true); // Hộp thoại modal: dòng tiếp theo chạy khi hộp thoại đã đóng
+
+        notificationDialogOpen = false;
+        pendingPopups.clear(); // Những thông báo mới tới lúc đang mở hộp thoại đã được hiện trong đó
+        updateNotificationBadge();
+        if (dialog.isGoToReservations() && currentUser != null) {
+            navigateTo(reserveButton, CARD_RESERVATIONS);
+        }
     }
 
     /** UC-06: hỏi xác nhận; chỉ khi người dùng chọn "Đồng ý" mới đăng xuất và báo Backend. */
@@ -377,6 +483,8 @@ public class MainFrame extends JFrame {
 
     private void handleLogout() {
         currentUser = null;
+        notifier.stop(); // Dừng hỏi thông báo và xóa dữ liệu của phiên này
+        pendingPopups.clear();
         historyPanel.clear(); // Không để người đăng nhập sau thấy dữ liệu của người trước
         finePanel.clear();
         reservationPanel.clear();
@@ -386,6 +494,7 @@ public class MainFrame extends JFrame {
         adminUsersPanel.clear();
         configPanel.reset();
         readerPanel.clear();
+        bookManagementPanel.clear();
 
         // Báo Backend xóa phiên đăng nhập của kết nối (chạy nền, không chặn giao diện)
         new SwingWorker<Void, Void>() {
@@ -401,6 +510,9 @@ public class MainFrame extends JFrame {
         headerRightPanel.add(loginButton);
         headerRightPanel.revalidate();
         headerRightPanel.repaint();
+
+        userMenuButton = null;
+        notifyMenuItem = null;
 
         updateSidebarByRole(null);
         navigateTo(homeButton, CARD_HOME);
