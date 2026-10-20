@@ -15,6 +15,8 @@ import library.model.ReservationListResult;
 import library.model.ReturnBookResult;
 import library.model.SystemConfig;
 import library.model.UserListResult;
+import library.model.WaitingReservationResult;
+import library.model.AssignReservationResult;
 import library.model.Request;
 import library.model.Response;
 import library.model.User;
@@ -136,7 +138,7 @@ public class SocketClient {
     private static final Set<String> SAFE_TO_RETRY =
             Set.of("LOGIN", "SEARCH_BOOKS", "GET_BOOK_DETAIL", "GET_CATEGORIES",
                    "GET_BORROW_HISTORY", "GET_LIBRARIANS", "GET_READERS", "GET_SYSTEM_CONFIG", "GET_FINES",
-                   "CHECK_CARD_ELIGIBILITY", "GET_MY_RESERVATIONS");
+                   "CHECK_CARD_ELIGIBILITY", "GET_MY_RESERVATIONS", "GET_WAITING_RESERVATIONS");
 
     // Cấu hình giả lập (chỉ dùng ở chế độ Mock), có lưu lại để thử luồng Sửa -> Xác nhận
     private final Map<String, Object> mockConfig = new LinkedHashMap<>();
@@ -230,6 +232,39 @@ public class SocketClient {
             it.put("daThanhToan", x[8]);
             mockFines.add(it);
         }
+    }
+
+    // Lượt đặt trước giả lập của nhiều độc giả (phía Thủ thư), có lưu lại để thử luồng Khóa sách
+    private final List<Map<String, Object>> mockWaiting = new ArrayList<>();
+    // Cuốn đang mượn có hạn trả gần nhất theo mã đầu sách (gợi ý khi khóa); đầu sách không có = không có cuốn đang mượn
+    private final Map<Integer, String[]> mockGoiY = new LinkedHashMap<>();
+    {
+        java.time.LocalDateTime now = java.time.LocalDateTime.now().withNano(0);
+        // (mã đặt, mã thẻ, tên độc giả, mã đầu sách, tên sách, trạng thái, đặt cách đây N ngày)
+        Object[][] samples = {
+            {12, 1, "Nguyễn Văn An", 2, "Clean Code", "WAITING", 5},
+            {14, 2, "Trần Thị Bình", 2, "Clean Code", "WAITING", 2},
+            {13, 3, "Lê Minh Châu", 4, "Doraemon", "WAITING", 1},
+            {15, 4, "Phạm Quốc Dũng", 3, "C++ Programming", "WAITING", 3},
+            {9, 2, "Trần Thị Bình", 1, "Java Core", "RESERVED", 8},
+            {8, 3, "Lê Minh Châu", 3, "C++ Programming", "NOTIFIED", 10},
+            {5, 1, "Nguyễn Văn An", 1, "Java Core", "COMPLETED", 40},
+            {3, 4, "Phạm Quốc Dũng", 4, "Doraemon", "CANCELLED", 70},
+        };
+        for (Object[] x : samples) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("maDatTruoc", x[0]);
+            m.put("maThe", x[1]);
+            m.put("tenDocGia", x[2]);
+            m.put("maDauSach", x[3]);
+            m.put("tenSach", x[4]);
+            m.put("ngayDat", now.minusDays((Integer) x[6]).toString());
+            m.put("trangThai", x[5]);
+            mockWaiting.add(m);
+        }
+        mockGoiY.put(2, new String[]{"BS-2-01", java.time.LocalDate.now().plusDays(3).toString()});
+        mockGoiY.put(3, new String[]{"BS-3-02", java.time.LocalDate.now().plusDays(6).toString()});
+        // Đầu sách 4 (Doraemon) cố ý không có cuốn đang mượn để thử trường hợp báo lỗi
     }
 
     private SocketClient() {
@@ -390,6 +425,50 @@ public class SocketClient {
         String dataJson = mapper.writeValueAsString(response.getData());
         CardEligibilityResult result = mapper.readValue(dataJson, CardEligibilityResult.class);
         result.message = response.getMessage(); // Lý do nằm ở message của Response, không nằm trong data
+        return result;
+    }
+
+    /**
+     * Gọi action GET_WAITING_RESERVATIONS (UC-07 giai đoạn 2, Thủ thư): danh sách lượt đặt trước của MỌI độc giả,
+     * sắp theo ngày đặt tăng dần (đúng thứ tự hàng chờ). trangThai = WAITING | RESERVED | NOTIFIED | COMPLETED | CANCELLED;
+     * Backend mặc định WAITING. Với WAITING, mỗi lượt kèm cuonSachGoiY (cuốn đang mượn có hạn trả gần nhất).
+     *
+     * Chỉ đọc nên nằm trong SAFE_TO_RETRY.
+     */
+    public List<WaitingReservationResult.Item> getWaitingReservations(String trangThai) throws Exception {
+        Map<String, Object> payload = new HashMap<>();
+        if (trangThai != null) payload.put("trangThai", trangThai);
+
+        Response response = sendRequest("GET_WAITING_RESERVATIONS", payload);
+
+        if (!"SUCCESS".equalsIgnoreCase(response.getStatus()) || response.getData() == null) {
+            throw new Exception(describeFailure(response, "Không tải được danh sách đặt trước!"));
+        }
+
+        String dataJson = mapper.writeValueAsString(response.getData());
+        WaitingReservationResult result = mapper.readValue(dataJson, WaitingReservationResult.class);
+        return result.danhSach == null ? new ArrayList<>() : result.danhSach;
+    }
+
+    /**
+     * Gọi action ASSIGN_RESERVATION (UC-07 giai đoạn 2, Thủ thư): khóa một cuốn sách cho lượt đặt trước đang WAITING.
+     * Không gửi maCuonSach để Backend tự chọn cuốn đang mượn có hạn trả gần nhất (hoặc giữ thẳng cuốn đã sẵn sàng).
+     *
+     * Không nằm trong SAFE_TO_RETRY: action ghi dữ liệu nên không tự gửi lại khi lỗi kết nối.
+     */
+    public AssignReservationResult assignReservation(int maDatTruoc) throws Exception {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("maDatTruoc", maDatTruoc);
+
+        Response response = sendRequest("ASSIGN_RESERVATION", payload);
+
+        if (!"SUCCESS".equalsIgnoreCase(response.getStatus()) || response.getData() == null) {
+            throw new Exception(describeFailure(response, "Khóa cuốn sách cho lượt đặt trước thất bại!"));
+        }
+
+        String dataJson = mapper.writeValueAsString(response.getData());
+        AssignReservationResult result = mapper.readValue(dataJson, AssignReservationResult.class);
+        result.message = response.getMessage();
         return result;
     }
 
@@ -1172,6 +1251,77 @@ public class SocketClient {
             data.put("soSachToiDa", toiDa);
             data.put("conDuocMuon", Math.max(0, toiDa - dangMuon));
             return mapper.writeValueAsString(new Response("SUCCESS", message, data));
+        }
+
+        if ("GET_WAITING_RESERVATIONS".equals(req.getAction()) || "ASSIGN_RESERVATION".equals(req.getAction())) {
+            if (!"LIBRARIAN".equals(mockRole)) {
+                return mapper.writeValueAsString(new Response("FORBIDDEN", "Bạn không có quyền thực hiện chức năng này!", null));
+            }
+            Map<String, Object> params = req.getData() == null ? new LinkedHashMap<>() : mapper.readValue(
+                mapper.writeValueAsString(req.getData()),
+                new TypeReference<Map<String, Object>>() {}
+            );
+
+            if ("GET_WAITING_RESERVATIONS".equals(req.getAction())) {
+                String filter = params.get("trangThai") == null ? "WAITING" : String.valueOf(params.get("trangThai"));
+                List<Map<String, Object>> list = new ArrayList<>();
+                for (Map<String, Object> r : mockWaiting) {
+                    if (!filter.equals(String.valueOf(r.get("trangThai")))) continue;
+                    Map<String, Object> v = new LinkedHashMap<>(r);
+                    String[] g = "WAITING".equals(filter) ? mockGoiY.get(((Number) r.get("maDauSach")).intValue()) : null;
+                    if (g == null) {
+                        v.put("cuonSachGoiY", null);
+                    } else {
+                        Map<String, Object> goiY = new LinkedHashMap<>();
+                        goiY.put("maCuonSach", g[0]);
+                        goiY.put("ngayHenTra", g[1]);
+                        v.put("cuonSachGoiY", goiY);
+                    }
+                    list.add(v);
+                }
+                list.sort((a, b) -> String.valueOf(a.get("ngayDat")).compareTo(String.valueOf(b.get("ngayDat"))));
+                Map<String, Object> data = new LinkedHashMap<>();
+                data.put("danhSach", list);
+                return mapper.writeValueAsString(new Response("SUCCESS", "Tải danh sách chờ thành công", data));
+            }
+
+            // ASSIGN_RESERVATION
+            Object idObj = params.get("maDatTruoc");
+            if (!(idObj instanceof Number)) {
+                return mapper.writeValueAsString(new Response("BAD_REQUEST", "Thiếu hoặc sai tham số: maDatTruoc", null));
+            }
+            int id = ((Number) idObj).intValue();
+            Map<String, Object> target = null;
+            for (Map<String, Object> r : mockWaiting) {
+                if (((Number) r.get("maDatTruoc")).intValue() == id) target = r;
+            }
+            if (target == null) {
+                return mapper.writeValueAsString(new Response("ERROR", "Không tìm thấy lượt đặt trước mã: " + id, null));
+            }
+            if (!"WAITING".equals(String.valueOf(target.get("trangThai")))) {
+                return mapper.writeValueAsString(new Response("ERROR", "Lượt đặt trước không ở trạng thái WAITING", null));
+            }
+            for (Map<String, Object> r : mockWaiting) { // Phải xử lý lượt cũ hơn của cùng đầu sách trước
+                if ("WAITING".equals(String.valueOf(r.get("trangThai")))
+                        && r.get("maDauSach").equals(target.get("maDauSach"))
+                        && String.valueOf(r.get("ngayDat")).compareTo(String.valueOf(target.get("ngayDat"))) < 0) {
+                    return mapper.writeValueAsString(new Response("ERROR",
+                            "Phải xử lý lượt đặt trước cũ hơn của đầu sách này trước", null));
+                }
+            }
+            String[] g = mockGoiY.get(((Number) target.get("maDauSach")).intValue());
+            if (g == null) {
+                return mapper.writeValueAsString(new Response("ERROR",
+                        "Đầu sách không có cuốn nào đang được mượn để giữ chỗ", null));
+            }
+            target.put("trangThai", "RESERVED");
+            mockGoiY.remove(((Number) target.get("maDauSach")).intValue()); // Cuốn đó đã bị khóa, không còn gợi ý được nữa
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("maDatTruoc", id);
+            data.put("trangThai", "RESERVED");
+            data.put("maCuonSach", g[0]);
+            data.put("ngayHenTraCuaCuon", g[1]);
+            return mapper.writeValueAsString(new Response("SUCCESS", "Đã khóa cuốn sách cho lượt đặt trước", data));
         }
 
         if ("GET_FINES".equals(req.getAction())) {

@@ -25,6 +25,7 @@ public class MainFrame extends JFrame {
     private static final String CARD_FINES = "FINES";
     private static final String CARD_RESERVATIONS = "RESERVATIONS";
     private static final String CARD_FINE_MANAGE = "FINE_MANAGE";
+    private static final String CARD_RESERVE_MANAGE = "RESERVE_MANAGE";
     private static final String CARD_RETURN = "RETURN";
     private static final String CARD_ADMIN_USERS = "ADMIN_USERS";
     private static final String CARD_CONFIG = "CONFIG";
@@ -49,6 +50,7 @@ public class MainFrame extends JFrame {
     private JButton reserveButton;
     private JButton fineButton;
     private JButton manageFineButton;
+    private JButton manageReserveButton;
     private JButton approveBorrowButton;
     private JButton checkCardButton;
     private JButton returnBookButton;
@@ -67,6 +69,7 @@ public class MainFrame extends JFrame {
     private CardCheckPanel cardCheckPanel;   // Tương tự: kết quả kiểm tra thẻ của Thủ thư
     private FinePanel finePanel;             // Tương tự: phiếu phạt của Độc giả
     private ReservationPanel reservationPanel; // Tương tự: các lượt đặt trước của Độc giả
+    private ReservationManagementPanel reservationManagementPanel; // Tương tự: lượt đặt trước của mọi độc giả (Thủ thư)
     private FineManagementPanel fineManagementPanel; // Tương tự: toàn bộ phiếu phạt của Thủ thư
     private AdminUsersPanel adminUsersPanel; // Tương tự: danh sách người dùng của Admin
     private ReaderManagementPanel readerPanel; // Tương tự: xóa danh sách thẻ vừa tạo khi đăng xuất
@@ -132,13 +135,14 @@ public class MainFrame extends JFrame {
         headerRightPanel.setOpaque(false);
 
         // Nút Toggle Dark/Light Mode
-        themeToggleButton = new JButton("🌙");
-        themeToggleButton.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 16));
+        // Icon vẽ bằng code (không dùng emoji) để hai trạng thái luôn cùng kích thước, không lệch theo font
+        themeToggleButton = new JButton(new ThemeIcon(false));
+        themeToggleButton.setToolTipText("Chuyển sang giao diện tối");
         themeToggleButton.setFocusPainted(false);
         themeToggleButton.setContentAreaFilled(false);
         themeToggleButton.setBorderPainted(false);
         themeToggleButton.setCursor(new Cursor(Cursor.HAND_CURSOR));
-        themeToggleButton.setPreferredSize(new Dimension(50, 36));
+        themeToggleButton.setPreferredSize(new Dimension(40, 36));
         themeToggleButton.setMargin(new Insets(0, 0, 0, 0));
         themeToggleButton.addActionListener(e -> toggleTheme());
 
@@ -168,6 +172,7 @@ public class MainFrame extends JFrame {
         checkCardButton = createMenuButton("Kiểm tra thẻ");
         returnBookButton = createMenuButton("Trả sách");
         manageFineButton = createMenuButton("Quản lý phiếu phạt");
+        manageReserveButton = createMenuButton("Quản lý đặt trước");
         manageStockButton = createMenuButton("Quản lý kho sách");
         manageReaderButton = createMenuButton("Quản lý độc giả");
 
@@ -194,6 +199,8 @@ public class MainFrame extends JFrame {
         contentPanel.add(finePanel, CARD_FINES);
         reservationPanel = new ReservationPanel();
         contentPanel.add(reservationPanel, CARD_RESERVATIONS);
+        reservationManagementPanel = new ReservationManagementPanel();
+        contentPanel.add(reservationManagementPanel, CARD_RESERVE_MANAGE);
         fineManagementPanel = new FineManagementPanel();
         contentPanel.add(fineManagementPanel, CARD_FINE_MANAGE);
         contentPanel.add(new ReturnBookPanel(), CARD_RETURN);
@@ -233,6 +240,7 @@ public class MainFrame extends JFrame {
         checkCardButton.addActionListener(e -> navigateTo(checkCardButton, CARD_CARD_CHECK));
         returnBookButton.addActionListener(e -> navigateTo(returnBookButton, CARD_RETURN));
         manageFineButton.addActionListener(e -> navigateTo(manageFineButton, CARD_FINE_MANAGE));
+        manageReserveButton.addActionListener(e -> navigateTo(manageReserveButton, CARD_RESERVE_MANAGE));
         manageStockButton.addActionListener(e -> navigateTo(manageStockButton, CARD_HOME));
         manageReaderButton.addActionListener(e -> navigateTo(manageReaderButton, CARD_READERS));
 
@@ -299,13 +307,15 @@ public class MainFrame extends JFrame {
 
         if (isDarkMode) {
             FlatDarkLaf.setup();
-            themeToggleButton.setText("☀️");
+            themeToggleButton.setIcon(new ThemeIcon(true));
+            themeToggleButton.setToolTipText("Chuyển sang giao diện sáng");
             if (titleLabel != null) {
                 titleLabel.setForeground(new Color(52, 211, 153));
             }
         } else {
             FlatLightLaf.setup();
-            themeToggleButton.setText("🌙");
+            themeToggleButton.setIcon(new ThemeIcon(false));
+            themeToggleButton.setToolTipText("Chuyển sang giao diện tối");
             if (titleLabel != null) {
                 titleLabel.setForeground(new Color(16, 185, 129));
             }
@@ -372,6 +382,7 @@ public class MainFrame extends JFrame {
         reservationPanel.clear();
         cardCheckPanel.clear();
         fineManagementPanel.clear();
+        reservationManagementPanel.clear();
         adminUsersPanel.clear();
         configPanel.reset();
         readerPanel.clear();
@@ -412,6 +423,7 @@ public class MainFrame extends JFrame {
             addMenuButton(approveBorrowButton);
             addMenuButton(checkCardButton);
             addMenuButton(returnBookButton);
+            addMenuButton(manageReserveButton);
             addMenuButton(manageFineButton);
             addMenuButton(manageStockButton);
             addMenuButton(manageReaderButton);
@@ -440,5 +452,46 @@ public class MainFrame extends JFrame {
         label.setFont(new Font("Arial", Font.BOLD, 24));
         panel.add(label);
         return panel;
+    }
+    /** Icon mặt trăng (đang sáng) / mặt trời (đang tối), luôn 22x22 và căn giữa tuyệt đối. */
+    private static class ThemeIcon implements Icon {
+        private static final int SIZE = 22;
+        private final boolean sun;
+
+        ThemeIcon(boolean sun) { this.sun = sun; }
+
+        @Override public int getIconWidth() { return SIZE; }
+        @Override public int getIconHeight() { return SIZE; }
+
+        @Override
+        public void paintIcon(Component c, Graphics g, int x, int y) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            try {
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
+                double cx = x + SIZE / 2.0, cy = y + SIZE / 2.0;
+                if (sun) {
+                    g2.setColor(new Color(251, 191, 36));          // vàng
+                    double r = 4.5;
+                    g2.fill(new java.awt.geom.Ellipse2D.Double(cx - r, cy - r, 2 * r, 2 * r));
+                    g2.setStroke(new BasicStroke(1.8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                    for (int i = 0; i < 8; i++) {
+                        double a = Math.PI / 4 * i;
+                        g2.draw(new java.awt.geom.Line2D.Double(
+                                cx + Math.cos(a) * 7.2, cy + Math.sin(a) * 7.2,
+                                cx + Math.cos(a) * 9.8, cy + Math.sin(a) * 9.8));
+                    }
+                } else {
+                    g2.setColor(new Color(71, 85, 105));           // xám xanh đậm
+                    java.awt.geom.Area moon = new java.awt.geom.Area(
+                            new java.awt.geom.Ellipse2D.Double(cx - 8, cy - 8, 16, 16));
+                    moon.subtract(new java.awt.geom.Area(
+                            new java.awt.geom.Ellipse2D.Double(cx - 2.5, cy - 11, 15, 15)));
+                    g2.fill(moon);
+                }
+            } finally {
+                g2.dispose();
+            }
+        }
     }
 }
