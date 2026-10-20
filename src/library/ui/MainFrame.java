@@ -6,6 +6,7 @@ import com.formdev.flatlaf.FlatLaf;
 import library.model.Reservation;
 import library.model.User;
 import library.service.SocketClient;
+import library.ui.system.ReportPanel;
 
 import javax.swing.*;
 import java.awt.*;
@@ -34,6 +35,7 @@ public class MainFrame extends JFrame {
     private static final String CARD_CONFIG = "CONFIG";
     private static final String CARD_READERS = "READERS";
     private static final String CARD_BOOKS = "BOOKS";
+    private static final String CARD_REPORT = "REPORT";
 
     // Header Components
     private JPanel headerRightPanel;
@@ -226,6 +228,7 @@ public class MainFrame extends JFrame {
         contentPanel.add(readerPanel, CARD_READERS);
         bookManagementPanel = new BookManagementPanel();
         contentPanel.add(bookManagementPanel, CARD_BOOKS);
+        contentPanel.add(new ReportPanel(), CARD_REPORT);
 
         setupNotifier();
 
@@ -266,7 +269,7 @@ public class MainFrame extends JFrame {
         manageReaderButton.addActionListener(e -> navigateTo(manageReaderButton, CARD_READERS));
 
         // Thống kê & Báo cáo (UC-16) chưa làm: tạm trỏ về Trang chủ
-        reportButton.addActionListener(e -> navigateTo(reportButton, CARD_HOME));
+        reportButton.addActionListener(e -> navigateTo(reportButton, CARD_REPORT));
         manageAccountButton.addActionListener(e -> navigateTo(manageAccountButton, CARD_ADMIN_USERS));
         configButton.addActionListener(e -> navigateTo(configButton, CARD_CONFIG));
 
