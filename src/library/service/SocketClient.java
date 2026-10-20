@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import library.model.Book;
 import library.model.AddBookResult;
+import library.model.AddCopiesResult;
 import library.model.BookDetail;
 import library.model.Categories;
 import library.model.AddReaderResult;
@@ -967,6 +968,32 @@ public class SocketClient {
             throw new Exception(describeFailure(response, "Xóa đầu sách thất bại!"));
         }
         return response.getMessage() != null ? response.getMessage() : "Xóa đầu sách thành công!";
+    }
+
+    /**
+     * UC-12: Thủ thư nhập các cuốn sách vật lý (mã vạch) vào kho cho một đầu sách (ADD_BOOK_COPIES).
+     * Cuốn mới có trạng thái AVAILABLE; Backend cộng tongSoLuong và soLuongKhaDung. "Tất cả hoặc không":
+     * có một mã đã tồn tại (kể cả trùng ngay trong danh sách) thì không cuốn nào được nhập và Exception mang đúng lý do.
+     *
+     * @param tinhTrangVatLy tình trạng vật lý của các cuốn mới; null = không gửi (Backend mặc định "Mới")
+     * @return số liệu mới của đầu sách; {@link AddCopiesResult#message} là thông báo của Backend
+     *
+     * Không nằm trong SAFE_TO_RETRY: gửi lại sau lỗi kết nối có thể báo "mã đã tồn tại" dù các cuốn đã được nhập.
+     */
+    public AddCopiesResult addBookCopies(int maDauSach, List<String> maCuonSachList, String tinhTrangVatLy) throws Exception {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("maDauSach", maDauSach);
+        payload.put("maCuonSachList", maCuonSachList);
+        if (tinhTrangVatLy != null) payload.put("tinhTrangVatLy", tinhTrangVatLy);
+
+        Response response = sendRequest("ADD_BOOK_COPIES", payload);
+
+        if (!"SUCCESS".equalsIgnoreCase(response.getStatus()) || response.getData() == null) {
+            throw new Exception(describeFailure(response, "Nhập cuốn sách vào kho thất bại!"));
+        }
+        AddCopiesResult result = mapper.readValue(mapper.writeValueAsString(response.getData()), AddCopiesResult.class);
+        result.message = response.getMessage() != null ? response.getMessage() : "Nhập cuốn sách vào kho thành công!";
+        return result;
     }
 
     /** Đóng kết nối tới Backend (gọi khi thoát ứng dụng nếu cần). */

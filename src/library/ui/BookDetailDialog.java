@@ -1,5 +1,6 @@
 package library.ui;
 
+import library.model.AddCopiesResult;
 import library.model.BookDetail;
 import library.model.Categories;
 import library.service.SocketClient;
@@ -20,7 +21,9 @@ import java.util.concurrent.ExecutionException;
  *    rồi "Xác nhận" hoặc "Hủy". Chỉ gửi những trường thật sự bị đổi.
  *  - "Xóa đầu sách": hỏi xác nhận rồi gửi DELETE_BOOK_TITLE. Backend chỉ cho xóa khi chưa từng có giao dịch
  *    mượn / đặt trước; nếu không xóa được thì hiện đúng lý do của Backend ngay trong hộp thoại.
- * Số lượng cuốn chỉ để xem: các cuốn sách vật lý được quản lý riêng.
+ *  - "Nhập thêm cuốn sách": mở AddCopiesDialog để nhập các cuốn vật lý (mã vạch) vào kho (ADD_BOOK_COPIES);
+ *    số lượng hiển thị được cập nhật ngay theo số liệu mới của Backend.
+ * Số lượng cuốn chỉ để xem; sửa tình trạng từng cuốn vật lý sẽ làm riêng.
  *
  * Backend chỉ trả TÊN tác giả / thể loại / NXB chứ không trả mã, nên các ô chọn được chọn sẵn bằng cách đối chiếu tên
  * với danh mục. Nếu không đối chiếu được thì ô chọn để ở "(Giữ nguyên)" và trường đó không bị gửi đi.
@@ -57,6 +60,7 @@ public class BookDetailDialog extends JDialog {
     private final JPanel categoryHolder = new JPanel(new CardLayout());
     private final JPanel publisherHolder = new JPanel(new CardLayout());
 
+    private final JButton addCopiesButton = new JButton("Nhập thêm cuốn sách");
     private final JButton editButton = new JButton("Cập nhật thông tin");
     private final JButton deleteButton = new JButton("Xóa đầu sách");
     private final JButton closeButton = new JButton("Đóng");
@@ -125,6 +129,7 @@ public class BookDetailDialog extends JDialog {
         deleteButton.setForeground(ERROR_COLOR);
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        buttons.add(addCopiesButton);
         buttons.add(editButton);
         buttons.add(deleteButton);
         buttons.add(closeButton);
@@ -136,6 +141,7 @@ public class BookDetailDialog extends JDialog {
 
         setContentPane(form);
 
+        addCopiesButton.addActionListener(e -> openAddCopies());
         editButton.addActionListener(e -> startEdit());
         deleteButton.addActionListener(e -> confirmDelete());
         closeButton.addActionListener(e -> closeIfIdle());
@@ -147,7 +153,7 @@ public class BookDetailDialog extends JDialog {
         giaField.addActionListener(e -> { if (editing) viTriField.requestFocusInWindow(); });
         viTriField.addActionListener(e -> { if (editing) confirmButton.requestFocusInWindow(); });
 
-        for (JButton button : new JButton[]{editButton, deleteButton, closeButton, cancelButton, confirmButton}) {
+        for (JButton button : new JButton[]{addCopiesButton, editButton, deleteButton, closeButton, cancelButton, confirmButton}) {
             button.getInputMap(JComponent.WHEN_FOCUSED)
                     .put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0, false), "pressed");
             button.getInputMap(JComponent.WHEN_FOCUSED)
@@ -288,12 +294,14 @@ public class BookDetailDialog extends JDialog {
     private void applyMode() {
         boolean view = !editing;
 
+        addCopiesButton.setVisible(view);
         editButton.setVisible(view);
         deleteButton.setVisible(view);
         closeButton.setVisible(view);
         cancelButton.setVisible(editing);
         confirmButton.setVisible(editing);
 
+        addCopiesButton.setEnabled(!busy);
         editButton.setEnabled(!busy);
         deleteButton.setEnabled(!busy);
         closeButton.setEnabled(!busy);
@@ -334,6 +342,26 @@ public class BookDetailDialog extends JDialog {
         if (!busy) {
             dispose();
         }
+    }
+
+    // ==========================================================
+    // NHẬP CUỐN SÁCH VÀO KHO (ADD_BOOK_COPIES)
+    // ==========================================================
+    private void openAddCopies() {
+        if (busy || editing) return;
+
+        AddCopiesDialog dialog = new AddCopiesDialog(this, detail.maDauSach, detail.tenSach);
+        dialog.setVisible(true); // Hộp thoại modal: dòng tiếp theo chạy khi hộp thoại đã đóng
+
+        AddCopiesResult result = dialog.getResult();
+        if (result == null) return; // Người dùng hủy hoặc chưa nhập được
+
+        // Backend trả số liệu mới của đầu sách: hiển thị luôn, không cần tải lại
+        detail.tongSoLuong = result.tongSoLuong;
+        detail.soLuongKhaDung = result.soLuongKhaDung;
+        modified = true;
+        showItem();
+        setStatus("Đã nhập " + result.soCuonDaThem + " cuốn vào kho.", SUCCESS_COLOR);
     }
 
     // ==========================================================

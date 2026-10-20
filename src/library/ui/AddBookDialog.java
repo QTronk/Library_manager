@@ -32,6 +32,7 @@ public class AddBookDialog extends JDialog {
     private final JButton confirmButton = new JButton("Xác nhận");
 
     private Integer createdId = null; // Mã đầu sách vừa tạo
+    private String createdTitle = null; // Tên đầu sách vừa tạo
     private boolean busy = false;     // Đang chờ Backend trả lời
 
     public AddBookDialog(Window owner, Categories categories) {
@@ -112,6 +113,11 @@ public class AddBookDialog extends JDialog {
     /** Sau khi hộp thoại đóng: mã đầu sách vừa tạo, hoặc null nếu chưa tạo. */
     public Integer getCreatedId() {
         return createdId;
+    }
+
+    /** Sau khi hộp thoại đóng: tên đầu sách vừa tạo (null nếu chưa tạo). */
+    public String getCreatedTitle() {
+        return createdTitle;
     }
 
     private void addRow(JPanel form, GridBagConstraints c, int row, String label, JComponent field) {
@@ -199,6 +205,7 @@ public class AddBookDialog extends JDialog {
             protected void done() {
                 try {
                     createdId = get();
+                    createdTitle = tenSach;
                     setBusy(false);
                     dispose();
                 } catch (InterruptedException ex) {

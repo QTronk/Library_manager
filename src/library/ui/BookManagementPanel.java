@@ -1,5 +1,6 @@
 package library.ui;
 
+import library.model.AddCopiesResult;
 import library.model.Book;
 import library.model.BookDetail;
 import library.model.Categories;
@@ -27,14 +28,14 @@ import java.util.Set;
 import java.util.concurrent.ExecutionException;
 
 /**
- * Màn hình "Quản lý kho sách" của Thủ thư (UC-12, phần ĐẦU SÁCH): thêm, sửa, xóa đầu sách.
- * Phần cuốn sách vật lý (mã vạch) và danh mục Tác giả / NXB / Thể loại sẽ làm sau.
+ * Màn hình "Quản lý kho sách" của Thủ thư (UC-12): thêm, sửa, xóa đầu sách và nhập cuốn sách (mã vạch) vào kho.
+ * Danh mục Tác giả / NXB / Thể loại và sửa tình trạng từng cuốn sẽ làm sau.
  *
  * - Mở ra là tự tải TOÀN BỘ đầu sách (SEARCH_BOOKS); ô tìm kiếm khớp theo từ khóa do Backend quyết định.
  *   Bấm tiêu đề cột để sắp xếp (làm ở Client).
- * - Bấm vào một dòng để xem chi tiết (BookDetailDialog), trong đó có "Cập nhật thông tin" và "Xóa đầu sách".
+ * - Bấm vào một dòng để xem chi tiết (BookDetailDialog), trong đó có "Nhập thêm cuốn sách", "Cập nhật thông tin" và "Xóa đầu sách".
  * - Nút "+ Thêm đầu sách" mở hộp thoại thêm (AddBookDialog). Danh mục Tác giả / Thể loại / NXB cho các ô chọn
- *   được tải mới từ Backend mỗi lần mở hộp thoại.
+ *   được tải mới từ Backend mỗi lần mở hộp thoại. Thêm xong, màn hình hỏi có nhập cuốn sách (AddCopiesDialog) ngay không.
  */
 public class BookManagementPanel extends JPanel {
 
@@ -283,10 +284,23 @@ public class BookManagementPanel extends JPanel {
                     Integer createdId = dialog.getCreatedId();
                     if (createdId == null) return; // Người dùng hủy hoặc chưa tạo được
 
-                    JOptionPane.showMessageDialog(BookManagementPanel.this,
+                    int choice = JOptionPane.showOptionDialog(BookManagementPanel.this,
                             "Thêm đầu sách mới thành công!\nMã đầu sách: " + createdId
-                                    + "\n\nĐầu sách mới chưa có cuốn sách nào (số lượng = 0).",
-                            "Thêm đầu sách", JOptionPane.INFORMATION_MESSAGE);
+                                    + "\n\nĐầu sách mới chưa có cuốn sách nào (số lượng = 0).\n"
+                                    + "Bạn muốn nhập cuốn sách vào kho ngay bây giờ?",
+                            "Thêm đầu sách", JOptionPane.YES_NO_OPTION, JOptionPane.INFORMATION_MESSAGE,
+                            null, new Object[]{"Nhập cuốn sách ngay", "Để sau"}, "Nhập cuốn sách ngay");
+                    if (choice == 0) { // 0 = "Nhập cuốn sách ngay"
+                        AddCopiesDialog copies = new AddCopiesDialog(owner, createdId, dialog.getCreatedTitle());
+                        copies.setVisible(true);
+                        AddCopiesResult imported = copies.getResult();
+                        if (imported != null) {
+                            JOptionPane.showMessageDialog(BookManagementPanel.this,
+                                    "Đã nhập " + imported.soCuonDaThem + " cuốn vào kho.\nTổng số cuốn: "
+                                            + imported.tongSoLuong + " (sẵn sàng: " + imported.soLuongKhaDung + ").",
+                                    "Nhập cuốn sách", JOptionPane.INFORMATION_MESSAGE);
+                        }
+                    }
                     loadAll(); // Tải lại để thấy ngay đầu sách vừa thêm
                 } catch (InterruptedException ex) {
                     Thread.currentThread().interrupt();
