@@ -10,6 +10,8 @@ import library.model.BorrowTicketResult;
 import library.model.CardEligibilityResult;
 import library.model.CardUpdateResult;
 import library.model.FineListResult;
+import library.model.Reservation;
+import library.model.ReservationListResult;
 import library.model.ReturnBookResult;
 import library.model.SystemConfig;
 import library.model.UserListResult;
@@ -134,7 +136,7 @@ public class SocketClient {
     private static final Set<String> SAFE_TO_RETRY =
             Set.of("LOGIN", "SEARCH_BOOKS", "GET_BOOK_DETAIL", "GET_CATEGORIES",
                    "GET_BORROW_HISTORY", "GET_LIBRARIANS", "GET_READERS", "GET_SYSTEM_CONFIG", "GET_FINES",
-                   "CHECK_CARD_ELIGIBILITY");
+                   "CHECK_CARD_ELIGIBILITY", "GET_MY_RESERVATIONS");
 
     // Cấu hình giả lập (chỉ dùng ở chế độ Mock), có lưu lại để thử luồng Sửa -> Xác nhận
     private final Map<String, Object> mockConfig = new LinkedHashMap<>();
@@ -736,6 +738,59 @@ public class SocketClient {
             throw new Exception(describeFailure(response, "Cập nhật thẻ độc giả thất bại!"));
         }
         return mapper.readValue(mapper.writeValueAsString(response.getData()), CardUpdateResult.class);
+    }
+
+    /**
+     * Gọi action RESERVE_BOOK (UC-07, Độc giả): đặt trước một đầu sách đã hết cuốn sẵn sàng.
+     * Backend lấy thẻ từ phiên đăng nhập nên không gửi maThe; lượt đặt mới có trạng thái WAITING.
+     *
+     * Không nằm trong SAFE_TO_RETRY: action ghi dữ liệu nên không tự gửi lại khi lỗi kết nối.
+     */
+    public Reservation reserveBook(int maDauSach) throws Exception {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("maDauSach", maDauSach);
+
+        Response response = sendRequest("RESERVE_BOOK", payload);
+
+        if (!"SUCCESS".equalsIgnoreCase(response.getStatus()) || response.getData() == null) {
+            throw new Exception(describeFailure(response, "Đặt trước sách thất bại!"));
+        }
+        return mapper.readValue(mapper.writeValueAsString(response.getData()), Reservation.class);
+    }
+
+    /**
+     * Gọi action GET_MY_RESERVATIONS (UC-07, UC-10, Độc giả): các lượt đặt trước còn hiệu lực
+     * (WAITING / RESERVED / NOTIFIED) của chính mình, mới đặt nhất trước. Chỉ đọc nên nằm trong SAFE_TO_RETRY.
+     */
+    public List<Reservation> getMyReservations() throws Exception {
+        Response response = sendRequest("GET_MY_RESERVATIONS", null);
+
+        if (!"SUCCESS".equalsIgnoreCase(response.getStatus()) || response.getData() == null) {
+            throw new Exception(describeFailure(response, "Không tải được danh sách đặt trước!"));
+        }
+        ReservationListResult result = mapper.readValue(
+                mapper.writeValueAsString(response.getData()), ReservationListResult.class);
+        return result.danhSach != null ? result.danhSach : new ArrayList<>();
+    }
+
+    /**
+     * Gọi action CANCEL_RESERVATION (UC-07): hủy một lượt đặt trước của chính mình.
+     * Backend tự xử lý theo trạng thái cũ (chuyển cuốn cho người kế tiếp hoặc trả về kho).
+     *
+     * @return thông báo của Backend ("Hủy đặt trước thành công")
+     *
+     * Không nằm trong SAFE_TO_RETRY: action ghi dữ liệu nên không tự gửi lại khi lỗi kết nối.
+     */
+    public String cancelReservation(int maDatTruoc) throws Exception {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("maDatTruoc", maDatTruoc);
+
+        Response response = sendRequest("CANCEL_RESERVATION", payload);
+
+        if (!"SUCCESS".equalsIgnoreCase(response.getStatus())) {
+            throw new Exception(describeFailure(response, "Hủy đặt trước thất bại!"));
+        }
+        return response.getMessage() != null ? response.getMessage() : "Hủy đặt trước thành công";
     }
 
     /** Đóng kết nối tới Backend (gọi khi thoát ứng dụng nếu cần). */

@@ -4,9 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 /**
  * Một ĐẦU SÁCH, khớp JSON mà Backend trả về trong action SEARCH_BOOKS:
- * { maDauSach, tenSach, giaTien, tacGia, theLoai, nhaXuatBan }
- *
- * Lưu ý: Backend chưa trả "số lượng còn" nên Book chưa có field này.
+ * { maDauSach, tenSach, giaTien, tacGia, theLoai, nhaXuatBan, tongSoLuong, soLuongKhaDung, ... }
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Book {
@@ -16,6 +14,8 @@ public class Book {
     private String tacGia;
     private String theLoai;
     private String nhaXuatBan;
+    private int tongSoLuong;       // Số cuốn hiện có (không tính cuốn mất)
+    private int soLuongKhaDung;    // Số cuốn đang sẵn sàng cho mượn
 
     public Book() {}
 
@@ -46,4 +46,10 @@ public class Book {
 
     public String getNhaXuatBan() { return nhaXuatBan; }
     public void setNhaXuatBan(String nhaXuatBan) { this.nhaXuatBan = nhaXuatBan; }
+
+    public int getTongSoLuong() { return tongSoLuong; }
+    public void setTongSoLuong(int tongSoLuong) { this.tongSoLuong = tongSoLuong; }
+
+    public int getSoLuongKhaDung() { return soLuongKhaDung; }
+    public void setSoLuongKhaDung(int soLuongKhaDung) { this.soLuongKhaDung = soLuongKhaDung; }
 }
