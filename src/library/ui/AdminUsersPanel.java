@@ -23,8 +23,10 @@ import java.util.concurrent.ExecutionException;
  * Màn hình "Thống kê người dùng" của Admin: danh sách người dùng cấp Thủ thư trở xuống
  * (Thủ thư và Độc giả). Bấm vào một dòng để xem thông tin chi tiết (UserDetailDialog).
  *
- * - Thủ thư: GET_LIBRARIANS (quyền ADMIN).
- * - Độc giả: GET_READERS. Lưu ý: theo bảng phân quyền hiện tại của Backend, action này chỉ dành cho Thủ thư,
+ * - Thủ thư: GET_LIBRARIANS (quyền ADMIN). Có nút "+ Thêm thủ thư" (ADD_LIBRARIAN) và trong hộp thoại chi tiết
+ *   có nút "Cập nhật thông tin" (UPDATE_LIBRARIAN). Các nút này chỉ hiện khi đang xem danh sách Thủ thư (UC-15).
+ * - Độc giả: GET_READERS, chỉ để xem; việc quản lý độc giả do Thủ thư làm (UC-11).
+ *   Lưu ý: theo bảng phân quyền hiện tại của Backend, action này chỉ dành cho Thủ thư,
  *   nên Admin sẽ nhận lỗi "không có quyền" cho đến khi Backend mở thêm quyền ADMIN cho action này.
  */
 public class AdminUsersPanel extends JPanel {
@@ -52,6 +54,7 @@ public class AdminUsersPanel extends JPanel {
 
     private final JComboBox<String> roleBox = new JComboBox<>(new String[]{"Thủ thư", "Độc giả"});
     private final JTextField keywordField = new JTextField(22);
+    private final JButton addButton = new JButton("+ Thêm thủ thư");
     private JTable table;
     private DefaultTableModel model;
     private JLabel statusLabel;
@@ -74,10 +77,16 @@ public class AdminUsersPanel extends JPanel {
             keywordField.setText("");
             loadUsers();
         });
+        addButton.addActionListener(e -> openAddDialog());
+
+        // Góc phải: nút Thêm thủ thư (chỉ hiện khi đang xem Thủ thư) và nút Làm mới
+        JPanel titleActions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        titleActions.add(addButton);
+        titleActions.add(refreshButton);
 
         JPanel titleRow = new JPanel(new BorderLayout(10, 10));
         titleRow.add(title, BorderLayout.WEST);
-        titleRow.add(refreshButton, BorderLayout.EAST);
+        titleRow.add(titleActions, BorderLayout.EAST);
 
         keywordField.putClientProperty("JTextField.placeholderText", "Tìm theo họ tên, email, số điện thoại");
         JButton searchButton = new JButton("Tìm");
@@ -139,11 +148,37 @@ public class AdminUsersPanel extends JPanel {
         statusLabel.setText(" ");
     }
 
+    // ==========================================================
+    // CHI TIẾT / THÊM THỦ THƯ
+    // ==========================================================
     private void showDetail(UserListResult.Item item) {
         Window owner = SwingUtilities.getWindowAncestor(this);
-        new UserDetailDialog(owner, item, displayedLibrarian).setVisible(true);
+        UserDetailDialog dialog = new UserDetailDialog(owner, item, displayedLibrarian);
+        dialog.setVisible(true); // Hộp thoại modal: dòng tiếp theo chạy khi hộp thoại đã đóng
+
+        if (dialog.isModified()) {
+            loadUsers(); // Có sửa thành công -> tải lại danh sách theo bộ lọc hiện tại
+        }
     }
 
+    private void openAddDialog() {
+        Window owner = SwingUtilities.getWindowAncestor(this);
+        AddLibrarianDialog dialog = new AddLibrarianDialog(owner);
+        dialog.setVisible(true);
+
+        if (!dialog.isCreated()) return; // Người dùng hủy hoặc chưa thêm được
+
+        JOptionPane.showMessageDialog(this,
+                "Thêm thủ thư thành công!\n\nThủ thư đăng nhập bằng email hoặc số điện thoại với mật khẩu vừa đặt.",
+                "Thêm thủ thư", JOptionPane.INFORMATION_MESSAGE);
+
+        keywordField.setText(""); // Xóa từ khóa để thấy ngay thủ thư vừa thêm
+        loadUsers();
+    }
+
+    // ==========================================================
+    // TẢI DANH SÁCH
+    // ==========================================================
     private void loadUsers() {
         final boolean librarian = roleBox.getSelectedIndex() == 0;
         final String keyword = keywordField.getText().trim();
@@ -151,6 +186,7 @@ public class AdminUsersPanel extends JPanel {
 
         // Đổi cột theo loại người dùng và xóa dòng cũ để không lẫn dữ liệu của loại kia
         displayedLibrarian = librarian;
+        addButton.setVisible(librarian); // Chỉ thủ thư mới thêm được ở màn hình này
         items.clear();
         model.setColumnIdentifiers(librarian ? LIBRARIAN_COLUMNS : READER_COLUMNS);
         applyColumnStyle(librarian); // Đổi cột thì JTable dựng lại cột nên phải đặt lại độ rộng và căn lề

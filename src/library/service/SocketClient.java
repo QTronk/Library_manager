@@ -570,6 +570,58 @@ public class SocketClient {
     }
 
     /**
+     * UC-15: Admin thêm Thủ thư mới (ADD_LIBRARIAN).
+     * Không nằm trong SAFE_TO_RETRY: gửi lại sau lỗi kết nối có thể báo trùng email dù thủ thư đã được tạo.
+     *
+     * @return thông báo của Backend
+     */
+    public String addLibrarian(String hoTen, String email, String soDienThoai, String matKhau) throws Exception {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("hoTen", hoTen);
+        payload.put("email", email);
+        payload.put("soDienThoai", soDienThoai);
+        payload.put("matKhau", matKhau);
+
+        Response response = sendRequest("ADD_LIBRARIAN", payload);
+
+        if (!"SUCCESS".equalsIgnoreCase(response.getStatus())) {
+            throw new Exception(describeFailure(response, "Thêm thủ thư thất bại!"));
+        }
+        return response.getMessage() != null ? response.getMessage() : "Thêm thủ thư thành công!";
+    }
+
+    /**
+     * UC-15: Admin sửa thông tin Thủ thư (UPDATE_LIBRARIAN). Trường nào null thì không gửi (Backend giữ nguyên).
+     * Không nằm trong SAFE_TO_RETRY vì là action ghi dữ liệu.
+     *
+     * @return thông báo của Backend
+     */
+    public String updateLibrarian(int maND, String hoTen, String email, String soDienThoai) throws Exception {
+        return updateLibrarian(maND, hoTen, email, soDienThoai, null);
+    }
+
+    /**
+     * Như trên, thêm trangThai: Boolean.FALSE = khóa tài khoản (không đăng nhập được),
+     * Boolean.TRUE = mở khóa, null = không đổi.
+     */
+    public String updateLibrarian(int maND, String hoTen, String email, String soDienThoai,
+                                  Boolean trangThai) throws Exception {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("maND", maND);
+        if (hoTen != null) payload.put("hoTen", hoTen);
+        if (email != null) payload.put("email", email);
+        if (soDienThoai != null) payload.put("soDienThoai", soDienThoai);
+        if (trangThai != null) payload.put("trangThai", trangThai);
+
+        Response response = sendRequest("UPDATE_LIBRARIAN", payload);
+
+        if (!"SUCCESS".equalsIgnoreCase(response.getStatus())) {
+            throw new Exception(describeFailure(response, "Cập nhật thủ thư thất bại!"));
+        }
+        return response.getMessage() != null ? response.getMessage() : "Cập nhật thủ thư thành công!";
+    }
+
+    /**
      * UC-15: Admin đặt lại mật khẩu cho một Thủ thư (UPDATE_LIBRARIAN chỉ gửi maND và matKhau).
      * Không nằm trong SAFE_TO_RETRY vì là action ghi dữ liệu.
      */
@@ -1310,6 +1362,29 @@ public class SocketClient {
             return mapper.writeValueAsString(new Response("SUCCESS", "Cập nhật thẻ độc giả thành công!", data));
         }
 
+        if ("ADD_LIBRARIAN".equals(req.getAction())) {
+            Map<String, Object> params = mapper.readValue(
+                mapper.writeValueAsString(req.getData()),
+                new TypeReference<Map<String, Object>>() {}
+            );
+            for (String key : new String[]{"hoTen", "email", "soDienThoai", "matKhau"}) {
+                if (params.get(key) == null || String.valueOf(params.get(key)).trim().isEmpty()) {
+                    return mapper.writeValueAsString(new Response("BAD_REQUEST", "Thiếu hoặc sai tham số: " + key, null));
+                }
+            }
+            if (isMockAccountTaken(params.get("email"), params.get("soDienThoai"), null)) {
+                return mapper.writeValueAsString(new Response("ERROR",
+                    "Email hoặc Số điện thoại đã được sử dụng bởi tài khoản khác", null));
+            }
+            int newUserId = mockNextUserId++;
+            mockLibrarians.add(mockLibrarian(newUserId, String.valueOf(params.get("hoTen")).trim(),
+                    String.valueOf(params.get("email")).trim(), String.valueOf(params.get("soDienThoai")).trim(), true));
+
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("maND", newUserId);
+            return mapper.writeValueAsString(new Response("SUCCESS", "Thêm thủ thư thành công!", data));
+        }
+
         if ("UPDATE_LIBRARIAN".equals(req.getAction())) {
             Map<String, Object> params = mapper.readValue(
                 mapper.writeValueAsString(req.getData()),
@@ -1319,6 +1394,22 @@ public class SocketClient {
             if (pw != null && String.valueOf(pw).length() < 6) {
                 return mapper.writeValueAsString(new Response("BAD_REQUEST", "Mật khẩu không hợp lệ (tối thiểu 6 ký tự)!", null));
             }
+            int maND = (params.get("maND") instanceof Number) ? ((Number) params.get("maND")).intValue() : -1;
+            Map<String, Object> target = null;
+            for (Map<String, Object> l : mockLibrarians) {
+                if (((Number) l.get("maND")).intValue() == maND) target = l;
+            }
+            if (target == null) {
+                return mapper.writeValueAsString(new Response("ERROR", "Không tìm thấy thủ thư mã: " + maND, null));
+            }
+            if (isMockAccountTaken(params.get("email"), params.get("soDienThoai"), target)) {
+                return mapper.writeValueAsString(new Response("ERROR",
+                    "Email hoặc Số điện thoại đã được sử dụng bởi tài khoản khác", null));
+            }
+            for (String key : new String[]{"hoTen", "email", "soDienThoai"}) {
+                if (params.get(key) != null) target.put(key, params.get(key));
+            }
+            if (params.get("trangThai") instanceof Boolean) target.put("trangThai", params.get("trangThai"));
             return mapper.writeValueAsString(new Response("SUCCESS", "Cập nhật thủ thư thành công!", null));
         }
 
@@ -1402,6 +1493,18 @@ public class SocketClient {
         }
 
         return mapper.writeValueAsString(new Response("BAD_REQUEST", "Hành động không được hỗ trợ trong Mock", null));
+    }
+
+    /** Mock: email / số điện thoại đã thuộc về tài khoản khác (thủ thư hoặc độc giả) chưa? exclude = bản ghi đang sửa. */
+    private boolean isMockAccountTaken(Object email, Object phone, Map<String, Object> exclude) {
+        List<Map<String, Object>> all = new ArrayList<>(mockLibrarians);
+        all.addAll(mockReaders);
+        for (Map<String, Object> u : all) {
+            if (u == exclude) continue;
+            if (email != null && String.valueOf(email).trim().equalsIgnoreCase(String.valueOf(u.get("email")))) return true;
+            if (phone != null && String.valueOf(phone).trim().equals(String.valueOf(u.get("soDienThoai")))) return true;
+        }
+        return false;
     }
 
     /** Dữ liệu sách giả lập, cùng "hình dạng" với dữ liệu Backend trả về. */
