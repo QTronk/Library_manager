@@ -47,6 +47,10 @@ public class MainFrame extends JFrame {
 
     // Sidebar Menu Panel & Nút bấm
     private JPanel menuPanel;
+    private SidebarHolder sidebarHolder;        // Khung bọc sidebar: co / giãn bề rộng khi thu vào / ra
+    private JButton sidebarToggleButton;        // Nút 3 gạch ngang ở góc trái header
+    private boolean sidebarCollapsed = false;
+    private Timer sidebarTimer;                 // Hiệu ứng trượt của sidebar
     private JButton homeButton;
     private JButton searchButton;
 
@@ -143,6 +147,18 @@ public class MainFrame extends JFrame {
             }
         } catch (Exception ignored) {}
 
+        // Nút 3 gạch ngang: thu vào / mở ra sidebar (đặt ở header để thu gọn rồi vẫn còn nút để mở lại)
+        sidebarToggleButton = new JButton(new HamburgerIcon());
+        sidebarToggleButton.setToolTipText("Thu gọn thanh bên");
+        sidebarToggleButton.setFocusPainted(false);
+        sidebarToggleButton.setContentAreaFilled(false);
+        sidebarToggleButton.setBorderPainted(false);
+        sidebarToggleButton.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        sidebarToggleButton.setPreferredSize(new Dimension(40, 36));
+        sidebarToggleButton.setMargin(new Insets(0, 0, 0, 0));
+        sidebarToggleButton.addActionListener(e -> toggleSidebar());
+
+        titlePanel.add(sidebarToggleButton);
         titlePanel.add(logo1Label);
         titlePanel.add(titleLabel);
         titlePanel.add(logoLabel);
@@ -279,7 +295,8 @@ public class MainFrame extends JFrame {
         });
 
         add(header, BorderLayout.NORTH);
-        add(menuPanel, BorderLayout.WEST);
+        sidebarHolder = new SidebarHolder(menuPanel);
+        add(sidebarHolder, BorderLayout.WEST);
         add(contentPanel, BorderLayout.CENTER);
 
         // Mặc định chọn Trang chủ ban đầu
@@ -590,6 +607,109 @@ public class MainFrame extends JFrame {
         c.insets = new Insets(0, 0, 120, 0);
         panel.add(box, c);
         return panel;
+    }
+
+    // ==========================================
+    // THU VÀO / MỞ RA SIDEBAR (mọi vai trò)
+    // ==========================================
+    private void toggleSidebar() {
+        sidebarCollapsed = !sidebarCollapsed;
+        sidebarToggleButton.setToolTipText(sidebarCollapsed ? "Mở rộng thanh bên" : "Thu gọn thanh bên");
+
+        final int from = sidebarHolder.currentWidth(); // Bấm giữa chừng thì đảo chiều từ vị trí đang trượt
+        final int target = sidebarCollapsed ? 0 : sidebarHolder.contentWidth();
+        if (sidebarTimer != null) sidebarTimer.stop();
+        if (!sidebarCollapsed) menuPanel.setVisible(true); // Hiện lại trước khi trượt ra
+
+        final long start = System.nanoTime();
+        final double durationMs = 180;
+        sidebarTimer = new Timer(12, null);
+        sidebarTimer.addActionListener(e -> {
+            double t = Math.min(1.0, (System.nanoTime() - start) / 1e6 / durationMs);
+            double eased = 1 - Math.pow(1 - t, 3); // Nhanh lúc đầu, chậm dần về cuối
+            sidebarHolder.setAnimatedWidth((int) Math.round(from + (target - from) * eased));
+            if (t >= 1.0) {
+                sidebarTimer.stop();
+                if (sidebarCollapsed) {
+                    menuPanel.setVisible(false); // Không cho Tab lọt vào nút đã ẩn
+                } else {
+                    sidebarHolder.setAnimatedWidth(-1); // Về bề rộng tự nhiên (đổi vai trò vẫn tự co giãn)
+                }
+            }
+        });
+        sidebarTimer.start();
+    }
+
+    /**
+     * Khung bọc sidebar: bề rộng có thể đặt tay (để trượt), còn nội dung luôn giữ nguyên bề rộng đầy đủ nên
+     * khi trượt các nút chỉ bị che dần chứ không bị bóp méo chữ.
+     */
+    private static final class SidebarHolder extends JPanel {
+        private final JComponent content;
+        private int animatedWidth = -1; // -1 = đúng bề rộng nội dung
+
+        SidebarHolder(JComponent content) {
+            super(null);
+            this.content = content;
+            setLayout(new LayoutManager() {
+                @Override public void addLayoutComponent(String name, Component comp) { }
+                @Override public void removeLayoutComponent(Component comp) { }
+
+                @Override
+                public Dimension preferredLayoutSize(Container parent) {
+                    return new Dimension(currentWidth(), content.getPreferredSize().height);
+                }
+
+                @Override
+                public Dimension minimumLayoutSize(Container parent) {
+                    return new Dimension(currentWidth(), 0);
+                }
+
+                @Override
+                public void layoutContainer(Container parent) {
+                    content.setBounds(0, 0, contentWidth(), parent.getHeight());
+                }
+            });
+            add(content);
+        }
+
+        int contentWidth() {
+            return content.getPreferredSize().width;
+        }
+
+        int currentWidth() {
+            return animatedWidth < 0 ? contentWidth() : animatedWidth;
+        }
+
+        void setAnimatedWidth(int width) {
+            animatedWidth = width;
+            revalidate();
+            repaint();
+        }
+    }
+
+    /** Biểu tượng 3 gạch ngang vẽ bằng code, màu theo giao diện sáng / tối hiện tại. */
+    private static class HamburgerIcon implements Icon {
+        @Override public int getIconWidth() { return 22; }
+        @Override public int getIconHeight() { return 22; }
+
+        @Override
+        public void paintIcon(Component c, Graphics g, int x, int y) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            try {
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
+                Color fg = UIManager.getColor("Label.foreground");
+                g2.setColor(fg != null ? fg : new Color(71, 85, 105));
+                g2.setStroke(new BasicStroke(2.2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                for (int i = 0; i < 3; i++) {
+                    double ly = y + 5 + i * 6;
+                    g2.draw(new java.awt.geom.Line2D.Double(x + 3, ly, x + 19, ly));
+                }
+            } finally {
+                g2.dispose();
+            }
+        }
     }
 
     /** Icon mặt trăng (đang sáng) / mặt trời (đang tối), luôn 22x22 và căn giữa tuyệt đối. */
