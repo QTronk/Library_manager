@@ -262,9 +262,33 @@ public class MainFrame extends JFrame {
         // ==========================================
         // 2. SIDEBAR MENU PANEL (WEST)
         // ==========================================
-        menuPanel = new JPanel();
+        // Sidebar là một khung nền xanh lá rất nhạt + viền xanh lá nhạt (màu đổi theo sáng / tối, xem sidebarFill()).
+        // Cạnh trái và cạnh dưới chạm sát mép cửa sổ; chỉ cạnh trên và cạnh phải có viền bo góc.
+        // Tự vẽ khung (thay vì dùng Border): đẩy cạnh trái / dưới ra ngoài vùng vẽ nên bị cắt đi, chỉ còn phần chạm mép.
+        menuPanel = new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                try {
+                    g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                    int x = -SIDEBAR_ARC;                          // Cạnh trái (và góc bo trái) nằm ngoài mép -> bị cắt
+                    int y = SIDEBAR_GAP;                           // Chừa khe nhỏ dưới thanh tiêu đề
+                    int w = getWidth() - SIDEBAR_GAP - 1 - x;      // Cạnh phải cách nội dung bên cạnh một khe nhỏ
+                    int h = getHeight() + SIDEBAR_ARC - y;         // Cạnh dưới (và góc bo dưới) nằm ngoài mép -> bị cắt
+                    g2.setColor(sidebarFill());
+                    g2.fillRoundRect(x, y, w, h, SIDEBAR_ARC, SIDEBAR_ARC);
+                    g2.setColor(sidebarBorder());
+                    g2.drawRoundRect(x, y, w, h, SIDEBAR_ARC, SIDEBAR_ARC);
+                } finally {
+                    g2.dispose();
+                }
+            }
+        };
+        menuPanel.setOpaque(false); // Phần ngoài khung (khe phía trên và bên phải) để lộ nền của cửa sổ
         menuPanel.setLayout(new BoxLayout(menuPanel, BoxLayout.Y_AXIS));
-        menuPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        // Đệm trong khung 10px như trước, cộng thêm khe ở phía trên và bên phải (trái và dưới chạm mép nên không có khe)
+        menuPanel.setBorder(BorderFactory.createEmptyBorder(
+                SIDEBAR_GAP + SIDEBAR_PAD, SIDEBAR_PAD, SIDEBAR_PAD, SIDEBAR_GAP + SIDEBAR_PAD));
 
         homeButton = createMenuButton("Trang chủ");
         searchButton = createMenuButton("Tra cứu sách");
@@ -408,6 +432,21 @@ public class MainFrame extends JFrame {
         return btn;
     }
 
+    // --- MÀU KHUNG SIDEBAR (xanh lá, cùng họ với màu nút Active 16,185,129) ---
+    private static final int SIDEBAR_GAP = 6;      // Khe giữa khung và thanh tiêu đề (trên) / vùng nội dung (phải)
+    private static final int SIDEBAR_PAD = 10;     // Đệm từ viền khung tới các nút
+    private static final int SIDEBAR_ARC = 14;     // Độ bo góc của khung
+
+    /** Nền khung: sáng = emerald-50 (nhạt nhất trong họ xanh lá); tối = xanh rêu rất đậm, tối hơn nền chính một chút. */
+    private Color sidebarFill() {
+        return isDarkMode ? new Color(30, 48, 42) : new Color(236, 253, 245);
+    }
+
+    /** Viền khung: sáng = emerald-200; tối = emerald-800. */
+    private Color sidebarBorder() {
+        return isDarkMode ? new Color(6, 95, 70) : new Color(167, 243, 208);
+    }
+
     private void addMenuButton(JButton btn) {
         menuPanel.add(btn);
         menuPanel.add(Box.createVerticalStrut(8));
@@ -436,6 +475,7 @@ public class MainFrame extends JFrame {
         }
 
         FlatLaf.updateUI();
+        menuPanel.repaint(); // Vẽ lại khung sidebar với bộ màu của giao diện mới
 
         // Cập nhật lại màu nút Active sau khi đổi Theme
         if (currentActiveButton != null) {
