@@ -10,6 +10,8 @@ import library.service.SocketClient;
 import javax.imageio.ImageIO;
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.net.URL;
@@ -429,7 +431,49 @@ public class MainFrame extends JFrame {
         btn.setHorizontalAlignment(SwingConstants.CENTER);
         btn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 38));
         btn.setAlignmentX(Component.CENTER_ALIGNMENT);
+        btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+        // Rê chuột vào: nút đổi sang nền xanh lá nhạt (nút đang Active giữ nguyên màu xanh đậm)
+        btn.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseEntered(MouseEvent e) {
+                hoveredButton = btn;
+                applyHover(btn, true);
+            }
+
+            @Override
+            public void mouseExited(MouseEvent e) {
+                applyHover(btn, false);
+                if (hoveredButton == btn) hoveredButton = null;
+            }
+        });
         return btn;
+    }
+
+    // --- HIỆU ỨNG RÊ CHUỘT CHO NÚT SIDEBAR ---
+    private JButton hoveredButton = null; // Nút sidebar đang được rê chuột vào
+
+    /** Màu nền nút khi rê chuột: sáng = emerald-100; tối = xanh lá sẫm hơn nền nút thường một bậc. */
+    private Color sidebarHoverFill() {
+        return isDarkMode ? new Color(35, 85, 68) : new Color(209, 250, 229);
+    }
+
+    /** Bật / tắt màu rê chuột. Nút đang Active không đổi (luôn xanh đậm). */
+    private void applyHover(JButton btn, boolean hover) {
+        if (btn == currentActiveButton) return;
+        if (hover) {
+            btn.setBackground(sidebarHoverFill());
+        } else {
+            btn.setBackground(UIManager.getColor("Button.background")); // Màu mặc định của giao diện (như setActiveButton)
+        }
+    }
+
+    /** Bỏ màu rê chuột còn sót (vd. nút bị gỡ khỏi sidebar khi đổi vai trò nên không nhận được sự kiện chuột rời đi). */
+    private void clearHover() {
+        if (hoveredButton != null) {
+            applyHover(hoveredButton, false);
+            hoveredButton = null;
+        }
     }
 
     // --- MÀU KHUNG SIDEBAR (xanh lá, cùng họ với màu nút Active 16,185,129) ---
@@ -655,6 +699,7 @@ public class MainFrame extends JFrame {
     }
 
     private void updateSidebarByRole(String role) {
+        clearHover();
         menuPanel.removeAll();
 
         addMenuButton(homeButton);
