@@ -7,8 +7,11 @@ import library.model.Reservation;
 import library.model.User;
 import library.service.SocketClient;
 
+import javax.imageio.ImageIO;
 import javax.swing.*;
 import java.awt.*;
+import java.awt.image.BufferedImage;
+import java.io.File;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
@@ -101,8 +104,78 @@ public class MainFrame extends JFrame {
         setMinimumSize(new Dimension(1000, 600));
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLocationRelativeTo(null);
+        setupAppIcon();
 
         createUI();
+    }
+
+    // ==========================================
+    // ICON ỨNG DỤNG (góc trái thanh tiêu đề, thanh tác vụ, hộp thoại con)
+    // ==========================================
+    private void setupAppIcon() {
+        List<Image> icons = new ArrayList<>();
+        try {
+            URL url = getClass().getResource("/logo1.png");
+            BufferedImage src = url != null ? ImageIO.read(url) : ImageIO.read(new File("logo1.png"));
+            if (src != null) {
+                // Nhiều cỡ để hệ điều hành chọn bản nét nhất cho từng nơi (thanh tiêu đề, Alt+Tab, thanh tác vụ...)
+                for (int size : new int[]{16, 20, 24, 32, 40, 48, 64, 128, 256}) {
+                    icons.add(squareIcon(src, size));
+                }
+            }
+        } catch (Exception ignored) {
+            // Không có logo thì dùng icon mặc định của Java
+        }
+        if (icons.isEmpty()) return;
+
+        setIconImages(icons); // Hộp thoại con (JOptionPane, JDialog...) tự dùng lại icon của cửa sổ chính
+        try {
+            // macOS hiện icon ở Dock qua Taskbar; nơi không hỗ trợ thì bỏ qua
+            if (Taskbar.isTaskbarSupported() && Taskbar.getTaskbar().isSupported(Taskbar.Feature.ICON_IMAGE)) {
+                Taskbar.getTaskbar().setIconImage(icons.get(icons.size() - 1));
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    /**
+     * Logo là hình chữ nhật (441x212) còn icon cửa sổ là hình vuông: đặt logo vào giữa ô vuông trong suốt
+     * (giữ nguyên tỉ lệ, không bị kéo méo) và thu nhỏ từng nấc cho nét.
+     */
+    private static BufferedImage squareIcon(BufferedImage src, int size) {
+        int w = size;
+        int h = Math.max(1, Math.round((float) src.getHeight() * size / src.getWidth()));
+
+        BufferedImage scaled = src;
+        int curW = src.getWidth(), curH = src.getHeight();
+        while (curW / 2 >= w && curH / 2 >= h) { // Thu nhỏ từng nửa để tránh răng cưa
+            curW /= 2;
+            curH /= 2;
+            scaled = resize(scaled, curW, curH);
+        }
+        scaled = resize(scaled, w, h);
+
+        BufferedImage icon = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = icon.createGraphics();
+        try {
+            g.drawImage(scaled, 0, (size - h) / 2, null);
+        } finally {
+            g.dispose();
+        }
+        return icon;
+    }
+
+    private static BufferedImage resize(BufferedImage img, int w, int h) {
+        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = out.createGraphics();
+        try {
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+            g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+            g.drawImage(img, 0, 0, w, h, null);
+        } finally {
+            g.dispose();
+        }
+        return out;
     }
 
     private void createUI() {
