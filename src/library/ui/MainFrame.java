@@ -291,25 +291,27 @@ public class MainFrame extends JFrame {
         // Đệm trong khung 10px như trước, cộng thêm khe ở phía trên và bên phải (trái và dưới chạm mép nên không có khe)
         menuPanel.setBorder(BorderFactory.createEmptyBorder(
                 SIDEBAR_GAP + SIDEBAR_PAD, SIDEBAR_PAD, SIDEBAR_PAD, SIDEBAR_GAP + SIDEBAR_PAD));
+        menuPanel.setPreferredSize(new Dimension(190, 0));
 
-        homeButton = createMenuButton("Trang chủ");
-        searchButton = createMenuButton("Tra cứu sách");
+        // Khởi tạo các nút Menu với Icon tương ứng
+        homeButton = createMenuButton("Trang chủ", SidebarIcon.Kind.HOME);
+        searchButton = createMenuButton("Tra cứu sách", SidebarIcon.Kind.SEARCH);
 
-        historyButton = createMenuButton("Lịch sử mượn");
-        reserveButton = createMenuButton("Đặt trước sách");
-        fineButton = createMenuButton("Phiếu phạt");
+        historyButton = createMenuButton("Lịch sử mượn", SidebarIcon.Kind.HISTORY);
+        reserveButton = createMenuButton("Đặt trước sách", SidebarIcon.Kind.RESERVE);
+        fineButton = createMenuButton("Phiếu phạt", SidebarIcon.Kind.FINE);
 
-        approveBorrowButton = createMenuButton("Lập phiếu mượn");
-        checkCardButton = createMenuButton("Kiểm tra thẻ");
-        returnBookButton = createMenuButton("Trả sách");
-        manageFineButton = createMenuButton("Quản lý phiếu phạt");
-        manageReserveButton = createMenuButton("Quản lý đặt trước");
-        manageStockButton = createMenuButton("Quản lý kho sách");
-        manageReaderButton = createMenuButton("Quản lý độc giả");
+        approveBorrowButton = createMenuButton("Lập phiếu mượn", SidebarIcon.Kind.BORROW);
+        checkCardButton = createMenuButton("Kiểm tra thẻ", SidebarIcon.Kind.CARD_CHECK);
+        returnBookButton = createMenuButton("Trả sách", SidebarIcon.Kind.RETURN);
+        manageFineButton = createMenuButton("Quản lý phiếu phạt", SidebarIcon.Kind.FINE_MANAGE);
+        manageReserveButton = createMenuButton("Quản lý đặt trước", SidebarIcon.Kind.RESERVE_MANAGE);
+        manageStockButton = createMenuButton("Quản lý kho sách", SidebarIcon.Kind.STOCK);
+        manageReaderButton = createMenuButton("Quản lý độc giả", SidebarIcon.Kind.READERS);
 
-        reportButton = createMenuButton("Thống kê & Báo cáo");
-        manageAccountButton = createMenuButton("Quản lý tài khoản");
-        configButton = createMenuButton("Cấu hình quy định");
+        reportButton = createMenuButton("Thống kê & Báo cáo", SidebarIcon.Kind.REPORT);
+        manageAccountButton = createMenuButton("Quản lý tài khoản", SidebarIcon.Kind.ACCOUNT);
+        configButton = createMenuButton("Cấu hình quy định", SidebarIcon.Kind.CONFIG);
 
         updateSidebarByRole(null);
 
@@ -426,10 +428,20 @@ public class MainFrame extends JFrame {
         }
     }
 
-    private JButton createMenuButton(String text) {
+    // --- HÀM TẠO NÚT SIDEBAR CÓ ICON ---
+    private JButton createMenuButton(String text, SidebarIcon.Kind iconKind) {
         JButton btn = new JButton(text);
-        btn.setHorizontalAlignment(SwingConstants.CENTER);
-        btn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 38));
+        
+        // Tích hợp Icon và tạo khoảng cách giữa Icon - Chữ
+        btn.setIcon(new SidebarIcon(iconKind));
+        btn.setIconTextGap(13);
+        btn.setMargin(new Insets(5, 15, 5, 15));
+
+        // Ép các nút căn trái để Icon thẳng hàng dọc, đệm lề trái 16px
+        btn.setHorizontalAlignment(SwingConstants.LEFT);
+        btn.setBorder(BorderFactory.createEmptyBorder(0, 16, 0, 0));
+        
+        btn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
         btn.setAlignmentX(Component.CENTER_ALIGNMENT);
         btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
