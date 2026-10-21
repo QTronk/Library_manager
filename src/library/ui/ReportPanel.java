@@ -1,9 +1,9 @@
-﻿package library.ui.system;
+﻿package library.ui;
 
 
 import library.model.Response;
 import library.service.SocketClient;
-import library.ui.UiTable;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 

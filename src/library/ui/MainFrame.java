@@ -6,7 +6,6 @@ import com.formdev.flatlaf.FlatLaf;
 import library.model.Reservation;
 import library.model.User;
 import library.service.SocketClient;
-import library.ui.system.ReportPanel;
 
 import javax.swing.*;
 import java.awt.*;
@@ -90,6 +89,7 @@ public class MainFrame extends JFrame {
     private ReaderManagementPanel readerPanel; // Tương tự: xóa danh sách thẻ vừa tạo khi đăng xuất
     private BookManagementPanel bookManagementPanel; // Tương tự: danh sách đầu sách của Thủ thư
     private SystemConfigPanel configPanel;   // Tương tự: thoát chế độ sửa và xóa dữ liệu khi đăng xuất
+    private HomeSearchBar homeSearchBar;     // Thanh tìm kiếm ở Trang chủ (mọi vai trò): xóa từ khóa khi đăng xuất
 
     public MainFrame() {
         setTitle("Library Management System");
@@ -498,6 +498,7 @@ public class MainFrame extends JFrame {
         configPanel.reset();
         readerPanel.clear();
         bookManagementPanel.clear();
+        homeSearchBar.clear();
 
         // Báo Backend xóa phiên đăng nhập của kết nối (chạy nền, không chặn giao diện)
         new SwingWorker<Void, Void>() {
@@ -563,11 +564,34 @@ public class MainFrame extends JFrame {
 
     private JPanel createHomePanel() {
         JPanel panel = new JPanel(new GridBagLayout());
+
         JLabel label = new JLabel("Chào mừng đến với Thư viện");
-        label.setFont(new Font("Arial", Font.BOLD, 24));
-        panel.add(label);
+        label.setFont(new Font("Arial", Font.BOLD, 28));
+        label.setAlignmentX(Component.CENTER_ALIGNMENT);
+
+        JLabel hint = new JLabel("Tìm sách theo tên, tác giả, thể loại hoặc nhà xuất bản");
+        hint.setForeground(UIManager.getColor("Label.disabledForeground"));
+        hint.setAlignmentX(Component.CENTER_ALIGNMENT);
+
+        homeSearchBar = new HomeSearchBar();
+        homeSearchBar.setAlignmentX(Component.CENTER_ALIGNMENT);
+
+        JPanel box = new JPanel();
+        box.setOpaque(false);
+        box.setLayout(new BoxLayout(box, BoxLayout.Y_AXIS));
+        box.add(label);
+        box.add(Box.createVerticalStrut(8));
+        box.add(hint);
+        box.add(Box.createVerticalStrut(22));
+        box.add(homeSearchBar);
+
+        // Nâng khối nội dung lên cao hơn tâm một chút cho cân đối khi cửa sổ lớn
+        GridBagConstraints c = new GridBagConstraints();
+        c.insets = new Insets(0, 0, 120, 0);
+        panel.add(box, c);
         return panel;
     }
+
     /** Icon mặt trăng (đang sáng) / mặt trời (đang tối), luôn 22x22 và căn giữa tuyệt đối. */
     private static class ThemeIcon implements Icon {
         private static final int SIZE = 22;
